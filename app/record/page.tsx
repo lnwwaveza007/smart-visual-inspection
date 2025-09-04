@@ -39,8 +39,20 @@ function saveRecords(records: RecordsIndex) {
   }
 }
 
+function formatOffset(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60)
+    .toString()
+    .padStart(2, "0");
+  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+
 export default function RecordPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<BlobPart[]>([]);
 
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
@@ -131,6 +143,7 @@ export default function RecordPage() {
           await videoEl.play();
           assignedStream = stream;
         }
+        streamRef.current = stream;
         setCameraActive(true);
         setCameraError(null);
         // After permission granted, labels become available
@@ -179,13 +192,16 @@ export default function RecordPage() {
     if (!isRecording || !text || !activeBarcode) return;
     const rec = ensureRecord(activeBarcode);
     if (!rec.name || rec.name.trim().length === 0) return;
+    const now = Date.now();
+    const start = sessionStartTsRef.current ?? now;
+    const offsetMs = Math.max(0, now - start);
     const updated: ItemRecord = {
       ...rec,
       remarks: [
         ...rec.remarks,
-        { text, ts: (sessionStartTsRef.current ?? Date.now()) },
+        { text, ts: offsetMs },
       ],
-      updatedAt: Date.now(),
+      updatedAt: offsetMs,
     };
     const next = { ...records, [activeBarcode]: updated };
     setRecords(next);
@@ -197,12 +213,12 @@ export default function RecordPage() {
     if (!isRecording) return;
     setIsRecording(false);
     const id = sessionId;
-    const sessionTs = sessionStartTsRef.current ?? Date.now();
     const items = sessionItemIds.map((bc) => {
       const rec = records[bc];
       return {
         name: rec?.name || "",
-        remarks: (rec?.remarks ?? []).map((r) => ({ text: r.text, ts: sessionTs })),
+        addedAt: rec?.createdAt ?? 0,
+        remarks: (rec?.remarks ?? []).map((r) => ({ text: r.text, ts: r.ts })),
       };
     }).filter((it) => (it.name && it.name.trim().length > 0) || (it.remarks && it.remarks.length > 0));
 
@@ -216,13 +232,40 @@ export default function RecordPage() {
       return;
     }
 
+    // Stop recorder and upload video named by session id
+    let persistedVideoExt: string = "webm";
+    try {
+      const recorder = mediaRecorderRef.current;
+      if (recorder) {
+        const stopped = new Promise<void>((resolve) => {
+          recorder.onstop = () => resolve();
+        });
+        const mimeType = recorder.mimeType || "video/webm";
+        recorder.stop();
+        await stopped;
+        const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+        const ext = mimeType.includes("webm") ? "webm" : mimeType.includes("mp4") ? "mp4" : "webm";
+        persistedVideoExt = ext;
+        await fetch(`/api/upload?name=${encodeURIComponent(id)}&ext=${encodeURIComponent(ext)}`, {
+          method: "POST",
+          headers: { "Content-Type": mimeType },
+          body: blob,
+        });
+      }
+    } catch {
+      // ignore upload errors
+    } finally {
+      mediaRecorderRef.current = null;
+      recordedChunksRef.current = [];
+    }
+
     setServerSaving(true);
     setServerError(null);
     try {
       const res = await fetch("http://localhost:4000/records");
       const existing = res.ok ? await res.json() : {};
       const key = (sessionNameInput.trim() || id);
-      const merged = { ...(existing || {}), [key]: { items } };
+      const merged = { ...(existing || {}), [key]: { items, sessionId: id, videoExt: persistedVideoExt } };
       const putRes = await fetch("http://localhost:4000/records", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -258,6 +301,31 @@ export default function RecordPage() {
     setActiveBarcode(null);
     setNameInput("");
     setRemarkInput("");
+    try {
+      const stream = streamRef.current;
+      if (stream) {
+        recordedChunksRef.current = [];
+        const preferredTypes = [
+          "video/webm;codecs=vp9,opus",
+          "video/webm;codecs=vp8,opus",
+          "video/webm",
+        ];
+        const supportsType = (type: string): boolean => {
+          try {
+            return typeof MediaRecorder !== "undefined" && typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported(type);
+          } catch {
+            return false;
+          }
+        };
+        const chosen = preferredTypes.find((t) => supportsType(t));
+        const recorder = new MediaRecorder(stream, chosen ? { mimeType: chosen } : undefined);
+        recorder.ondataavailable = (ev: BlobEvent) => {
+          if (ev.data && ev.data.size > 0) recordedChunksRef.current.push(ev.data);
+        };
+        recorder.start(1000);
+        mediaRecorderRef.current = recorder;
+      }
+    } catch {}
   }
 
   function handleAddItem() {
@@ -267,12 +335,14 @@ export default function RecordPage() {
     sessionBarcodesRef.current.add(id);
     setSessionItemIds((prev) => [...prev, id]);
     const now = Date.now();
+    const start = sessionStartTsRef.current ?? now;
+    const offsetMs = Math.max(0, now - start);
     const created: ItemRecord = {
       barcode: id,
       name: itemName,
       remarks: [],
-      createdAt: now,
-      updatedAt: now,
+      createdAt: offsetMs,
+      updatedAt: offsetMs,
     };
     const next = { ...records, [id]: created };
     setRecords(next);
@@ -317,7 +387,7 @@ export default function RecordPage() {
                 <ul className="mt-2 space-y-2">
                   {rec.remarks.map((r, idx) => (
                     <li key={idx} className="border border-gray-200 rounded p-2">
-                      <div className="text-xs text-gray-500">{new Date(r.ts).toLocaleString()}</div>
+                      <div className="text-xs text-gray-500">{formatOffset(r.ts)}</div>
                       <div className="whitespace-pre-wrap">{r.text}</div>
                     </li>
                   ))}
