@@ -41,20 +41,27 @@ function saveRecords(records: RecordsIndex) {
 
 export default function RecordPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const barcodeInputRef = useRef<HTMLInputElement | null>(null);
 
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraDevices, setCameraDevices] = useState<Array<{ deviceId: string; label: string }>>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 
   const [records, setRecords] = useState<RecordsIndex>({});
   const [activeBarcode, setActiveBarcode] = useState<string | null>(null);
-  const [firstBarcodeOfSession, setFirstBarcodeOfSession] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionStartTsRef = useRef<number | null>(null);
+  const sessionBarcodesRef = useRef<Set<string>>(new Set());
+  const [sessionItemIds, setSessionItemIds] = useState<string[]>([]);
+  const [sessionNameInput, setSessionNameInput] = useState("");
+  const [serverSaving, setServerSaving] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   const [nameInput, setNameInput] = useState("");
   const [remarkInput, setRemarkInput] = useState("");
 
-  const lastScanValueRef = useRef<string>("");
-  const lastScanTimeRef = useRef<number>(0);
+  // legacy scan state removed; manual item flow in use
 
   // Derived selected record
   const activeRecord = useMemo(() => (activeBarcode ? records[activeBarcode] : undefined), [records, activeBarcode]);
@@ -65,24 +72,56 @@ export default function RecordPage() {
     setRecords(loaded);
   }, []);
 
+  // Persist selected camera device
+  const SELECTED_CAMERA_KEY = "svi.selectedCameraId";
   useEffect(() => {
-    // Autofocus barcode input for hardware scanners
-    barcodeInputRef.current?.focus();
+    try {
+      const saved = localStorage.getItem(SELECTED_CAMERA_KEY);
+      if (saved) setSelectedDeviceId(saved);
+    } catch {
+      // ignore
+    }
   }, []);
+  useEffect(() => {
+    try {
+      if (selectedDeviceId) localStorage.setItem(SELECTED_CAMERA_KEY, selectedDeviceId);
+    } catch {
+      // ignore
+    }
+  }, [selectedDeviceId]);
+
+  // no autofocus needed; no scan input
+
+  // nameInput is used as the "new item name" input for creating items
 
   useEffect(() => {
-    // Sync name input when active record changes
-    setNameInput(activeRecord?.name ?? "");
-  }, [activeRecord?.name]);
-
-  useEffect(() => {
-    // Start camera preview only (no barcode decoding)
+    // Start or restart camera preview using the selected device (no barcode decoding)
     let unmounted = false;
     const videoEl = videoRef.current;
     let assignedStream: MediaStream | null = null;
+
+    const refreshDevices = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videos = devices
+          .filter((d) => d.kind === "videoinput")
+          .map((d) => ({ deviceId: d.deviceId, label: d.label || "Camera" }));
+        setCameraDevices(videos);
+        if (!selectedDeviceId && videos.length > 0) {
+          setSelectedDeviceId(videos[0].deviceId);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
     const start = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+        const constraints: MediaStreamConstraints = {
+          video: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : { facingMode: "environment" },
+          audio: false,
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         if (unmounted) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -93,12 +132,16 @@ export default function RecordPage() {
           assignedStream = stream;
         }
         setCameraActive(true);
+        setCameraError(null);
+        // After permission granted, labels become available
+        refreshDevices();
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Camera error";
         setCameraError(message);
         setCameraActive(false);
       }
     };
+
     start();
 
     return () => {
@@ -108,7 +151,7 @@ export default function RecordPage() {
         (videoEl as unknown as { srcObject: MediaStream | null }).srcObject = null;
       }
     };
-  }, []);
+  }, [selectedDeviceId]);
 
   function ensureRecord(barcode: string): ItemRecord {
     const existing = records[barcode];
@@ -127,56 +170,21 @@ export default function RecordPage() {
     return created;
   }
 
-  function handleScan(scanned: string) {
-    // Throttle duplicates within 1500ms
-    const now = Date.now();
-    if (scanned === lastScanValueRef.current && now - lastScanTimeRef.current < 1500) {
-      return;
-    }
-    lastScanValueRef.current = scanned;
-    lastScanTimeRef.current = now;
+  // scan-based flow removed
 
-    // Session rules
-    if (!activeBarcode) {
-      setActiveBarcode(scanned);
-      setFirstBarcodeOfSession(scanned);
-      ensureRecord(scanned);
-      return;
-    }
-
-    if (firstBarcodeOfSession && scanned === firstBarcodeOfSession) {
-      // Stop the process when scanning the initial barcode again
-      setActiveBarcode(null);
-      setFirstBarcodeOfSession(null);
-      setNameInput("");
-      setRemarkInput("");
-      return;
-    }
-
-    if (scanned !== activeBarcode) {
-      // Switch to new item by scanning next product barcode
-      setActiveBarcode(scanned);
-      setFirstBarcodeOfSession(scanned);
-      ensureRecord(scanned);
-    }
-  }
-
-  function handleNameSave(nextName: string) {
-    if (!activeBarcode) return;
-    const rec = ensureRecord(activeBarcode);
-    const updated: ItemRecord = { ...rec, name: nextName, updatedAt: Date.now() };
-    const next = { ...records, [activeBarcode]: updated };
-    setRecords(next);
-    saveRecords(next);
-  }
+  // no per-item name editing; items are named when added
 
   function handleAddRemark() {
     const text = remarkInput.trim();
-    if (!text || !activeBarcode) return;
+    if (!isRecording || !text || !activeBarcode) return;
     const rec = ensureRecord(activeBarcode);
+    if (!rec.name || rec.name.trim().length === 0) return;
     const updated: ItemRecord = {
       ...rec,
-      remarks: [...rec.remarks, { text, ts: Date.now() }],
+      remarks: [
+        ...rec.remarks,
+        { text, ts: (sessionStartTsRef.current ?? Date.now()) },
+      ],
       updatedAt: Date.now(),
     };
     const next = { ...records, [activeBarcode]: updated };
@@ -185,45 +193,139 @@ export default function RecordPage() {
     setRemarkInput("");
   }
 
+  async function stopSession() {
+    if (!isRecording) return;
+    setIsRecording(false);
+    const id = sessionId;
+    const sessionTs = sessionStartTsRef.current ?? Date.now();
+    const items = sessionItemIds.map((bc) => {
+      const rec = records[bc];
+      return {
+        name: rec?.name || "",
+        remarks: (rec?.remarks ?? []).map((r) => ({ text: r.text, ts: sessionTs })),
+      };
+    }).filter((it) => (it.name && it.name.trim().length > 0) || (it.remarks && it.remarks.length > 0));
+
+    if (!id) {
+      // Reset session state
+      setActiveBarcode(null);
+      setNameInput("");
+      setRemarkInput("");
+      sessionStartTsRef.current = null;
+      sessionBarcodesRef.current = new Set();
+      return;
+    }
+
+    setServerSaving(true);
+    setServerError(null);
+    try {
+      const res = await fetch("http://localhost:4000/records");
+      const existing = res.ok ? await res.json() : {};
+      const key = (sessionNameInput.trim() || id);
+      const merged = { ...(existing || {}), [key]: { items } };
+      const putRes = await fetch("http://localhost:4000/records", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(merged),
+      });
+      if (!putRes.ok) throw new Error(`HTTP ${putRes.status}`);
+    } catch (err: unknown) {
+      setServerError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setServerSaving(false);
+      // Reset session state
+      setActiveBarcode(null);
+      setNameInput("");
+      setRemarkInput("");
+      setSessionId(null);
+      setSessionNameInput("");
+      sessionStartTsRef.current = null;
+      sessionBarcodesRef.current = new Set();
+      setSessionItemIds([]);
+    }
+  }
+
+  function startSession() {
+    if (isRecording) return;
+    setServerError(null);
+    const ts = Date.now();
+    sessionStartTsRef.current = ts;
+    setSessionId(`session-${ts}`);
+    sessionBarcodesRef.current = new Set();
+    setSessionItemIds([]);
+    setSessionNameInput("");
+    setIsRecording(true);
+    setActiveBarcode(null);
+    setNameInput("");
+    setRemarkInput("");
+  }
+
+  function handleAddItem() {
+    const itemName = nameInput.trim();
+    if (!isRecording || !itemName || !sessionNameInput.trim()) return;
+    const id = `item-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    sessionBarcodesRef.current.add(id);
+    setSessionItemIds((prev) => [...prev, id]);
+    const now = Date.now();
+    const created: ItemRecord = {
+      barcode: id,
+      name: itemName,
+      remarks: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const next = { ...records, [id]: created };
+    setRecords(next);
+    saveRecords(next);
+    setActiveBarcode(id);
+    setNameInput("");
+    setRemarkInput("");
+  }
+
   const rightPanelContent = (() => {
-    if (!activeRecord) {
+    if (!isRecording) {
       return (
-        <div className="text-sm text-gray-500">
-          <p>No active item. Scan a product barcode to start.</p>
-          <p className="mt-2">Scan the same first barcode again to stop.</p>
-        </div>
+        <div className="text-sm text-gray-500">Start a session to add items.</div>
+      );
+    }
+    if (sessionItemIds.length === 0) {
+      return (
+        <div className="text-sm text-gray-500">No items yet. Enter an item name and click Add item.</div>
       );
     }
     return (
-      <div className="space-y-4">
-        <div>
-          <div className="text-xs uppercase text-gray-500">Barcode</div>
-          <div className="font-mono break-all">{activeRecord.barcode}</div>
-        </div>
-        <div>
-          <div className="text-xs uppercase text-gray-500">Item name</div>
-          <div>{activeRecord.name || <span className="text-gray-400">(unnamed)</span>}</div>
-        </div>
-        <div>
-          <div className="text-xs uppercase text-gray-500">History</div>
-          {activeRecord.remarks.length === 0 ? (
-            <div className="text-gray-400">No remarks yet.</div>
-          ) : (
-            <ul className="space-y-2 max-h-[60vh] overflow-auto pr-2">
-              {activeRecord.remarks
-                .slice()
-                .reverse()
-                .map((r, idx) => (
-                  <li key={idx} className="border border-gray-200 rounded p-2">
-                    <div className="text-xs text-gray-500">
-                      {new Date(r.ts).toLocaleString()}
-                    </div>
-                    <div className="whitespace-pre-wrap">{r.text}</div>
-                  </li>
-                ))}
-            </ul>
-          )}
-        </div>
+      <div className="space-y-4 max-h-[70vh] overflow-auto pr-2">
+        {sessionItemIds.map((id) => {
+          const rec = records[id];
+          if (!rec) return null;
+          return (
+            <div key={id} className={`border rounded p-3 ${activeBarcode === id ? "border-gray-800" : "border-gray-200"}`}>
+              <div className="flex items-center justify-between">
+                <div className="font-medium">{rec.name || "(unnamed)"}</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="text-xs px-2 py-1 rounded border"
+                    onClick={() => setActiveBarcode(id)}
+                  >
+                    Select
+                  </button>
+                  <div className="text-xs text-gray-500">{rec.remarks.length} remarks</div>
+                </div>
+              </div>
+              {rec.remarks.length > 0 && (
+                <ul className="mt-2 space-y-2">
+                  {rec.remarks.map((r, idx) => (
+                    <li key={idx} className="border border-gray-200 rounded p-2">
+                      <div className="text-xs text-gray-500">{new Date(r.ts).toLocaleString()}</div>
+                      <div className="whitespace-pre-wrap">{r.text}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   })();
@@ -231,9 +333,55 @@ export default function RecordPage() {
   return (
     <div className="p-4 md:p-6 lg:p-8">
       <h1 className="text-xl font-semibold">Record</h1>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        {!isRecording ? (
+          <button
+            type="button"
+            onClick={startSession}
+            className="px-4 py-2 rounded bg-green-600 text-white disabled:bg-gray-300"
+            disabled={serverSaving}
+          >
+            Start record
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={stopSession}
+            className="px-4 py-2 rounded bg-red-600 text-white disabled:bg-gray-300"
+            disabled={serverSaving}
+          >
+            Stop & Save
+          </button>
+        )}
+        {isRecording && (
+          <span className="text-sm text-red-600">Recording… Session: {sessionId}</span>
+        )}
+        {serverSaving && <span className="text-sm text-gray-600">Saving to server…</span>}
+        {serverError && <span className="text-sm text-red-600">{serverError}</span>}
+      </div>
       <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left: Camera preview + Inputs */}
         <div>
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <label className="block text-sm mb-1">Camera device</label>
+              <select
+                className="w-full border border-gray-300 rounded px-3 py-2 bg-white disabled:bg-gray-100"
+                value={selectedDeviceId ?? ""}
+                onChange={(e) => setSelectedDeviceId(e.target.value || null)}
+              >
+                {cameraDevices.length === 0 ? (
+                  <option value="">Default camera</option>
+                ) : (
+                  cameraDevices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label || "Camera"}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+          </div>
           <div className="aspect-video w-full bg-black/80 rounded overflow-hidden flex items-center justify-center">
             <video
               ref={videoRef}
@@ -254,41 +402,51 @@ export default function RecordPage() {
             )}
           </div>
 
-          <div className="mt-4">
-            <label className="block text-sm mb-1">Scan barcode</label>
-            <input
-              ref={barcodeInputRef}
-              type="text"
-              inputMode="numeric"
-              placeholder="Focus here and scan barcode..."
-              className="w-full border border-gray-300 rounded px-3 py-2"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  const value = (e.target as HTMLInputElement).value.trim();
-                  if (value) {
-                    handleScan(value);
-                    (e.target as HTMLInputElement).select();
-                  }
-                }
-              }}
-            />
-            <div className="mt-2 text-xs text-gray-500">Scan the first barcode again to stop the session.</div>
-          </div>
+          {/* Session name and add item flow */}
+          {isRecording && (
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="block text-sm mb-1">Session name</label>
+                <input
+                  type="text"
+                  value={sessionNameInput}
+                  onChange={(e) => setSessionNameInput(e.target.value)}
+                  placeholder="Enter session name"
+                  className="w-full border border-gray-300 rounded px-3 py-2"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1">New item name</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    placeholder={sessionNameInput.trim() ? "Type item name" : "Enter session name first"}
+                    disabled={!sessionNameInput.trim()}
+                    className="flex-1 border border-gray-300 rounded px-3 py-2 disabled:bg-gray-100 disabled:text-gray-500"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddItem();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddItem}
+                    disabled={!sessionNameInput.trim() || !nameInput.trim()}
+                    className="px-4 py-2 rounded bg-blue-600 text-white disabled:bg-gray-300"
+                  >
+                    Add item
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="mt-4 space-y-3">
-            <div>
-              <label className="block text-sm mb-1">Item name</label>
-              <input
-                type="text"
-                value={nameInput}
-                onChange={(e) => setNameInput(e.target.value)}
-                onBlur={() => handleNameSave(nameInput.trim())}
-                placeholder={activeBarcode ? "Enter item name" : "Scan an item first"}
-                disabled={!activeBarcode}
-                className="w-full border border-gray-300 rounded px-3 py-2 disabled:bg-gray-100 disabled:text-gray-500"
-              />
-            </div>
-
             <div>
               <label className="block text-sm mb-1">Add remark</label>
               <div className="flex gap-2">
@@ -296,9 +454,14 @@ export default function RecordPage() {
                   type="text"
                   value={remarkInput}
                   onChange={(e) => setRemarkInput(e.target.value)}
-                  placeholder={activeBarcode ? "Type remark and press Add" : "Scan an item first"}
-                  disabled={!activeBarcode}
+                  placeholder={activeBarcode ? "Type remark and press Add" : "Add an item first"}
+                  disabled={!isRecording || !activeBarcode}
                   className="flex-1 border border-gray-300 rounded px-3 py-2 disabled:bg-gray-100 disabled:text-gray-500"
+                  onFocus={(e) => {
+                    if (!activeRecord?.name?.trim()) {
+                      (e.target as HTMLInputElement).blur();
+                    }
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
@@ -309,7 +472,7 @@ export default function RecordPage() {
                 <button
                   type="button"
                   onClick={handleAddRemark}
-                  disabled={!activeBarcode || !remarkInput.trim()}
+                  disabled={!isRecording || !activeBarcode || !(activeRecord?.name?.trim()) || !remarkInput.trim()}
                   className="px-4 py-2 rounded bg-gray-900 text-white disabled:bg-gray-300"
                 >
                   Add
@@ -320,7 +483,7 @@ export default function RecordPage() {
             <div className="text-xs text-gray-500">
               {activeBarcode ? (
                 <span>
-                  Active item: <span className="font-mono">{activeBarcode}</span>. Scan the same first barcode again to stop.
+                  Active item: <span className="font-mono">{activeBarcode}</span>. Use Start/Stop to control the session.
                 </span>
               ) : (
                 <span>No active item.</span>
