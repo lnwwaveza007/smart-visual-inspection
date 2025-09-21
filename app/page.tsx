@@ -15,6 +15,22 @@ export default function Home() {
               /record — Record and history
             </Link>
           </li>
+          <li>
+            <Link
+              href="/report"
+              className="block w-full border border-gray-300 rounded px-4 py-3 hover:bg-gray-50"
+            >
+              /report — Reports viewer
+            </Link>
+          </li>
+          <li>
+            <Link
+              href="/report-table"
+              className="block w-full border border-gray-300 rounded px-4 py-3 hover:bg-gray-50"
+            >
+              /report-table — Report as table
+            </Link>
+          </li>
         </ul>
       </div>
     </main>
