@@ -44,35 +44,17 @@ export default function ReportTablePage() {
     };
   }, []);
 
-  const flatRows = useMemo(() => {
-    const entries: Array<{
-      sessionKey: string;
-      recordBy: string;
-      itemName: string;
-      addedAt?: number;
-      durationSec: number;
-      remarkTexts: string[];
-      sessionId?: string;
-      videoExt?: string;
-    }> = [];
-    const keys = Object.keys(records || {});
-    keys.forEach((key) => {
-      const entry = records[key];
-      const items = entry?.items || [];
-      items.forEach((it) => {
-        entries.push({
-          sessionKey: key,
-          recordBy: "-",
-          itemName: it.name || "(unnamed)",
-          addedAt: it.addedAt,
-          durationSec: it?.remarks?.length ? Math.max(0, Math.floor((it.remarks.at(-1)?.ts || 0) / 1000)) : 0,
-          remarkTexts: (it.remarks || []).map((r) => r.text),
-          sessionId: entry.sessionId,
-          videoExt: entry.videoExt,
-        });
-      });
+  const sessionRows = useMemo(() => {
+    return Object.entries(records || {}).map(([key, entry]) => {
+      const items = (entry?.items || []).map((it) => ({
+        name: it.name || "(unnamed)",
+        addedAt: it.addedAt,
+        durationSec: it?.remarks?.length ? Math.max(0, Math.floor((it.remarks.at(-1)?.ts || 0) / 1000)) : 0,
+        remarks: it.remarks || [],
+      }));
+      const videoPath = entry?.sessionId ? `/videos/${entry.sessionId}.${entry.videoExt || "webm"}` : null;
+      return { sessionKey: key, items, videoPath };
     });
-    return entries;
   }, [records]);
 
   return (
@@ -92,48 +74,67 @@ export default function ReportTablePage() {
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="text-left px-3 py-2">Record Name</th>
-              <th className="text-left px-3 py-2">Item</th>
-              <th className="text-left px-3 py-2">Added</th>
-              <th className="text-left px-3 py-2">Duration (s)</th>
+              <th className="text-left px-3 py-2">Items</th>
               <th className="text-left px-3 py-2">Remarks</th>
               <th className="text-left px-3 py-2">Video</th>
             </tr>
           </thead>
           <tbody>
-            {flatRows.length === 0 ? (
+            {sessionRows.length === 0 ? (
               <tr>
-                <td className="px-3 py-3 text-gray-500" colSpan={6}>No records</td>
+                <td className="px-3 py-3 text-gray-500" colSpan={4}>No records</td>
               </tr>
             ) : (
-              flatRows.map((row, idx) => {
-                const videoPath = row.sessionId ? `/videos/${row.sessionId}.${row.videoExt || "webm"}` : null;
-                return (
-                  <tr key={idx} className="border-t">
-                    <td className="px-3 py-2 whitespace-nowrap">{row.sessionKey}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{row.itemName}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{formatMsToTime(row.addedAt)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{row.durationSec}</td>
-                    <td className="px-3 py-2">
-                      {row.remarkTexts.length ? (
-                        <ul className="list-disc pl-5">
-                          {row.remarkTexts.map((t, i) => (
-                            <li key={i}>{t}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <span className="text-gray-500">-</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      {videoPath ? (
-                        <Link href={videoPath} className="text-blue-700 underline" target="_blank">View</Link>
-                      ) : (
-                        <span className="text-gray-500">-</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })
+              sessionRows.map((row, idx) => (
+                <tr key={idx} className="border-t align-top">
+                  <td className="px-3 py-2 whitespace-nowrap">{row.sessionKey}</td>
+                  <td className="px-3 py-2">
+                    {row.items.length ? (
+                      <ul className="space-y-2">
+                        {row.items.map((it, i) => (
+                          <li key={i} className="border rounded p-2">
+                            <div className="font-medium">{it.name}</div>
+                            <div className="text-xs text-gray-500">Added {formatMsToTime(it.addedAt)} · Duration {it.durationSec}s</div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span className="text-gray-500">-</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {row.items.length ? (
+                      <ul className="space-y-3">
+                        {row.items.map((it, i) => (
+                          <li key={i}>
+                            {it.remarks.length ? (
+                              <ul className="list-disc pl-5">
+                                {it.remarks.map((r, ri) => (
+                                  <li key={ri}>
+                                    <span className="text-xs text-gray-500 mr-2">{formatMsToTime(r.ts)}</span>
+                                    {r.text}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <span className="text-gray-500">-</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span className="text-gray-500">-</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {row.videoPath ? (
+                      <Link href={row.videoPath} className="text-blue-700 underline" target="_blank">View</Link>
+                    ) : (
+                      <span className="text-gray-500">-</span>
+                    )}
+                  </td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>

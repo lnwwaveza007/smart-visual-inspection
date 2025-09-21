@@ -78,6 +78,23 @@ export default function RecordPage() {
   // Derived selected record
   const activeRecord = useMemo(() => (activeBarcode ? records[activeBarcode] : undefined), [records, activeBarcode]);
 
+  // Enumerate available video input devices and keep selection valid
+  async function queryDevices() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videos = devices
+        .filter((d) => d.kind === "videoinput")
+        .map((d) => ({ deviceId: d.deviceId, label: d.label || "Camera" }));
+      setCameraDevices(videos);
+      const hasSelected = selectedDeviceId ? videos.some((v) => v.deviceId === selectedDeviceId) : false;
+      if ((!selectedDeviceId || !hasSelected) && videos.length > 0) {
+        setSelectedDeviceId(videos[0].deviceId);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   useEffect(() => {
     // Load saved records on mount
     const loaded = loadRecords();
@@ -112,20 +129,6 @@ export default function RecordPage() {
     const videoEl = videoRef.current;
     let assignedStream: MediaStream | null = null;
 
-    const refreshDevices = async () => {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videos = devices
-          .filter((d) => d.kind === "videoinput")
-          .map((d) => ({ deviceId: d.deviceId, label: d.label || "Camera" }));
-        setCameraDevices(videos);
-        if (!selectedDeviceId && videos.length > 0) {
-          setSelectedDeviceId(videos[0].deviceId);
-        }
-      } catch {
-        // ignore
-      }
-    };
 
     const start = async () => {
       try {
@@ -147,11 +150,15 @@ export default function RecordPage() {
         setCameraActive(true);
         setCameraError(null);
         // After permission granted, labels become available
-        refreshDevices();
+        queryDevices();
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Camera error";
         setCameraError(message);
         setCameraActive(false);
+        // Fallback: if selected device failed, clear selection to retry with default
+        if (selectedDeviceId) {
+          setSelectedDeviceId(null);
+        }
       }
     };
 
@@ -165,6 +172,21 @@ export default function RecordPage() {
       }
     };
   }, [selectedDeviceId]);
+
+  // Auto-refresh the device list when cameras are plugged/unplugged
+  useEffect(() => {
+    const handler = () => {
+      queryDevices();
+    };
+    try {
+      navigator.mediaDevices.addEventListener("devicechange", handler);
+    } catch {}
+    return () => {
+      try {
+        navigator.mediaDevices.removeEventListener("devicechange", handler);
+      } catch {}
+    };
+  }, []);
 
   function ensureRecord(barcode: string): ItemRecord {
     const existing = records[barcode];
@@ -451,6 +473,13 @@ export default function RecordPage() {
                 )}
               </select>
             </div>
+            <button
+              type="button"
+              onClick={() => queryDevices()}
+              className="px-3 py-2 rounded border"
+            >
+              Refresh
+            </button>
           </div>
           <div className="aspect-video w-full bg-black/80 rounded overflow-hidden flex items-center justify-center">
             <video
