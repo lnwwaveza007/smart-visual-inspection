@@ -1,0 +1,85 @@
+{
+  $jsonSchema: {
+    bsonType: 'object',
+    required: [
+      'recordId',
+      'sessionId',
+      'videoExt',
+      'items'
+    ],
+    properties: {
+      _id: {
+        bsonType: 'objectId'
+      },
+      recordId: {
+        bsonType: 'string'
+      },
+      sessionId: {
+        bsonType: 'string'
+      },
+      videoExt: {
+        bsonType: 'string'
+      },
+      items: {
+        bsonType: 'array',
+        items: {
+          bsonType: 'object',
+          required: [
+            'name',
+            'addedAt',
+            'remarks'
+          ],
+          properties: {
+            name: {
+              bsonType: 'string'
+            },
+            addedAt: {
+              bsonType: [
+                'int',
+                'long',
+                'double'
+              ]
+            },
+            remarks: {
+              bsonType: 'array',
+              items: {
+                bsonType: 'object',
+                required: [
+                  'text',
+                  'ts'
+                ],
+                properties: {
+                  text: {
+                    bsonType: 'string'
+                  },
+                  ts: {
+                    bsonType: [
+                      'int',
+                      'long',
+                      'double'
+                    ]
+                  }
+                },
+                additionalProperties: false
+              }
+            }
+          },
+          additionalProperties: false
+        }
+      },
+      createdAt: {
+        bsonType: [
+          'date',
+          'null'
+        ]
+      },
+      updatedAt: {
+        bsonType: [
+          'date',
+          'null'
+        ]
+      }
+    },
+    additionalProperties: false
+  }
+}
