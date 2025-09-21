@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { RECORDS_ENDPOINT } from "@/lib/config";
 // Camera is for preview only; barcode scanned via hardware input
 
 type Remark = {
@@ -284,11 +285,11 @@ export default function RecordPage() {
     setServerSaving(true);
     setServerError(null);
     try {
-      const res = await fetch("http://localhost:4000/records");
+      const res = await fetch(RECORDS_ENDPOINT);
       const existing = res.ok ? await res.json() : {};
       const key = (sessionNameInput.trim() || id);
       const merged = { ...(existing || {}), [key]: { items, sessionId: id, videoExt: persistedVideoExt } };
-      const putRes = await fetch("http://localhost:4000/records", {
+      const putRes = await fetch(RECORDS_ENDPOINT, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(merged),

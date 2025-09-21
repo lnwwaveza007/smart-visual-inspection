@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { RECORDS_ENDPOINT } from "@/lib/config";
 
 type Remark = { text: string; ts: number };
 type ReportItem = { name: string; remarks: Remark[]; addedAt?: number };
@@ -27,7 +28,7 @@ export default function ReportTablePage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("http://localhost:4000/records", { cache: "no-store" });
+        const res = await fetch(RECORDS_ENDPOINT, { cache: "no-store" });
         const data = res.ok ? await res.json() : {};
         if (!alive) return;
         setRecords(data || {});
