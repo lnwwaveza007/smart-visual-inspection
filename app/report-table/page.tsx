@@ -6,7 +6,14 @@ import { RECORDS_ENDPOINT } from "@/lib/config";
 
 type Remark = { text: string; ts: number };
 type ReportItem = { name: string; remarks: Remark[]; addedAt?: number };
-type ReportEntry = { items: ReportItem[]; sessionId?: string; videoExt?: string };
+type ReportEntry = {
+  items: ReportItem[];
+  sessionId?: string;
+  videoSource?: "local" | "drive";
+  videoExt?: string;
+  driveFileId?: string | null;
+  driveWebViewLink?: string | null;
+};
 
 function formatMsToTime(ms: number | undefined): string {
   const total = Math.max(0, Math.floor(((ms ?? 0) as number) / 1000));
@@ -53,8 +60,10 @@ export default function ReportTablePage() {
         durationSec: it?.remarks?.length ? Math.max(0, Math.floor((it.remarks.at(-1)?.ts || 0) / 1000)) : 0,
         remarks: it.remarks || [],
       }));
-      const videoPath = entry?.sessionId ? `/videos/${entry.sessionId}.${entry.videoExt || "webm"}` : null;
-      return { sessionKey: key, items, videoPath };
+      const isDrive = (entry?.videoSource || "local") === "drive";
+      const videoPath = !isDrive && entry?.sessionId ? `/videos/${entry.sessionId}.${entry.videoExt || "webm"}` : null;
+      const driveLink = isDrive ? (entry?.driveWebViewLink || null) : null;
+      return { sessionKey: key, items, videoPath, driveLink };
     });
   }, [records]);
 
@@ -130,6 +139,8 @@ export default function ReportTablePage() {
                   <td className="px-3 py-2">
                     {row.videoPath ? (
                       <Link href={row.videoPath} className="text-blue-700 underline" target="_blank">View</Link>
+                    ) : row.driveLink ? (
+                      <Link href={row.driveLink} className="text-blue-700 underline" target="_blank">Open in Drive</Link>
                     ) : (
                       <span className="text-gray-500">-</span>
                     )}

@@ -71,6 +71,15 @@ export default function RecordPage() {
   const [serverSaving, setServerSaving] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
+  // Storage selection and Google Drive auth state
+  const [storageMode, setStorageMode] = useState<"local" | "drive">("local");
+  const [driveAccessToken, setDriveAccessToken] = useState<string | null>(null);
+  const [driveTokenExpiryMs, setDriveTokenExpiryMs] = useState<number>(0);
+  const [driveFolderId, setDriveFolderId] = useState<string | null>(null);
+  const [driveFolderName, setDriveFolderName] = useState<string | null>(null);
+  const [driveFolders, setDriveFolders] = useState<Array<{ id: string; name: string }>>([]);
+  const [driveError, setDriveError] = useState<string | null>(null);
+
   const [nameInput, setNameInput] = useState("");
   const [remarkInput, setRemarkInput] = useState("");
 
@@ -123,6 +132,122 @@ export default function RecordPage() {
   // no autofocus needed; no scan input
 
   // nameInput is used as the "new item name" input for creating items
+
+  // Google Identity Services loader (browser only)
+  function getGoogleClientId(): string | null {
+    const cid = (process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID as string) || "";
+    return cid || null;
+  }
+
+  async function loadGis(): Promise<void> {
+    if (typeof window === "undefined") return;
+    if ((window as unknown as { google?: unknown }).google) return;
+    await new Promise<void>((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.defer = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Failed to load Google script"));
+      document.head.appendChild(script);
+    });
+  }
+
+  async function ensureDriveToken(interactive: boolean = true): Promise<string | null> {
+    try {
+      const clientId = getGoogleClientId();
+      if (!clientId) {
+        setDriveError("Missing NEXT_PUBLIC_GOOGLE_CLIENT_ID");
+        return null;
+      }
+      await loadGis();
+      if (driveAccessToken && Date.now() < driveTokenExpiryMs - 10_000) {
+        return driveAccessToken;
+      }
+      const googleAny = (window as unknown as { google: any }).google;
+      if (!googleAny?.accounts?.oauth2?.initTokenClient) {
+        setDriveError("Google auth unavailable");
+        return null;
+      }
+      const scopes = [
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/drive.metadata.readonly",
+      ].join(" ");
+      const token: { value: string | null } = { value: null };
+      await new Promise<void>((resolve) => {
+        const client = googleAny.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: scopes,
+          prompt: interactive ? "consent" : "",
+          callback: (resp: { access_token?: string; expires_in?: number; error?: string }) => {
+            if (resp?.error) {
+              setDriveError(resp.error);
+              token.value = null;
+            } else {
+              const expiresInSec = Math.max(1, Number(resp?.expires_in || 0));
+              setDriveAccessToken(resp.access_token || null);
+              setDriveTokenExpiryMs(Date.now() + expiresInSec * 1000);
+              setDriveError(null);
+              token.value = resp.access_token || null;
+            }
+            resolve();
+          },
+        });
+        client.requestAccessToken();
+      });
+      return token.value;
+    } catch (e) {
+      setDriveError(e instanceof Error ? e.message : "Drive auth failed");
+      return null;
+    }
+  }
+
+  async function listTopLevelDriveFolders(): Promise<void> {
+    try {
+      const token = await ensureDriveToken(true);
+      if (!token) return;
+      const q = encodeURIComponent("mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents");
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=100`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`Drive list failed ${res.status}`);
+      const data = (await res.json()) as { files?: Array<{ id: string; name: string }>};
+      setDriveFolders(data.files || []);
+    } catch (e) {
+      setDriveError(e instanceof Error ? e.message : "Failed to list folders");
+    }
+  }
+
+  async function uploadVideoToDrive(blob: Blob, filename: string, mimeType: string, folderId?: string | null): Promise<{ id: string; webViewLink?: string; webContentLink?: string } | null> {
+    try {
+      const token = await ensureDriveToken(true);
+      if (!token) return null;
+      const metadata = {
+        name: filename,
+        mimeType,
+        parents: folderId ? [folderId] : undefined,
+      } as Record<string, unknown>;
+      const boundary = `-------svi-${Math.random().toString(36).slice(2)}`;
+      const bodyParts = [
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` + JSON.stringify(metadata) + "\r\n",
+        `--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+        new Uint8Array(await blob.arrayBuffer()),
+        `\r\n--${boundary}--\r\n`,
+      ];
+      const multipartBody = new Blob(bodyParts as BlobPart[], { type: `multipart/related; boundary=${boundary}` });
+      const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,webContentLink", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: multipartBody,
+      });
+      if (!res.ok) throw new Error(`Drive upload failed ${res.status}`);
+      const json = await res.json();
+      return json as { id: string; webViewLink?: string; webContentLink?: string };
+    } catch (e) {
+      setDriveError(e instanceof Error ? e.message : "Drive upload failed");
+      return null;
+    }
+  }
 
   useEffect(() => {
     // Start or restart camera preview using the selected device (no barcode decoding)
@@ -257,6 +382,7 @@ export default function RecordPage() {
 
     // Stop recorder and upload video named by session id
     let persistedVideoExt: string = "webm";
+    let driveFile: { id: string; webViewLink?: string; webContentLink?: string } | null = null;
     try {
       const recorder = mediaRecorderRef.current;
       if (recorder) {
@@ -269,11 +395,16 @@ export default function RecordPage() {
         const blob = new Blob(recordedChunksRef.current, { type: mimeType });
         const ext = mimeType.includes("webm") ? "webm" : mimeType.includes("mp4") ? "mp4" : "webm";
         persistedVideoExt = ext;
-        await fetch(`/api/upload?name=${encodeURIComponent(id)}&ext=${encodeURIComponent(ext)}`, {
-          method: "POST",
-          headers: { "Content-Type": mimeType },
-          body: blob,
-        });
+        if (storageMode === "drive") {
+          const filename = `${id}.${ext}`;
+          driveFile = await uploadVideoToDrive(blob, filename, mimeType, driveFolderId);
+        } else {
+          await fetch(`/api/upload?name=${encodeURIComponent(id)}&ext=${encodeURIComponent(ext)}`, {
+            method: "POST",
+            headers: { "Content-Type": mimeType },
+            body: blob,
+          });
+        }
       }
     } catch {
       // ignore upload errors
@@ -288,7 +419,11 @@ export default function RecordPage() {
       const res = await fetch(RECORDS_ENDPOINT);
       const existing = res.ok ? await res.json() : {};
       const key = (sessionNameInput.trim() || id);
-      const merged = { ...(existing || {}), [key]: { items, sessionId: id, videoExt: persistedVideoExt } };
+      const entryBase: Record<string, unknown> = { items, sessionId: id };
+      const entry = storageMode === "drive"
+        ? { ...entryBase, videoSource: "drive", driveFileId: driveFile?.id || null, driveWebViewLink: driveFile?.webViewLink || null }
+        : { ...entryBase, videoSource: "local", videoExt: persistedVideoExt };
+      const merged = { ...(existing || {}), [key]: entry } as Record<string, unknown>;
       const putRes = await fetch(RECORDS_ENDPOINT, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -455,6 +590,75 @@ export default function RecordPage() {
       <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left: Camera preview + Inputs */}
         <div>
+          {/* Storage selection */}
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <label className="text-sm">Storage:</label>
+            <label className="text-sm flex items-center gap-1">
+              <input
+                type="radio"
+                name="storage"
+                value="local"
+                checked={storageMode === "local"}
+                onChange={() => setStorageMode("local")}
+              />
+              Local
+            </label>
+            <label className="text-sm flex items-center gap-1">
+              <input
+                type="radio"
+                name="storage"
+                value="drive"
+                checked={storageMode === "drive"}
+                onChange={() => setStorageMode("drive")}
+              />
+              Google Drive
+            </label>
+            {storageMode === "drive" && (
+              <>
+                {!driveAccessToken ? (
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded border"
+                    onClick={() => ensureDriveToken(true)}
+                  >
+                    Sign in to Drive
+                  </button>
+                ) : (
+                  <span className="text-xs text-green-700">Drive connected</span>
+                )}
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded border"
+                  onClick={() => listTopLevelDriveFolders()}
+                >
+                  Browse folders
+                </button>
+                {driveFolders.length > 0 && (
+                  <select
+                    className="border border-gray-300 rounded px-2 py-1 text-sm"
+                    value={driveFolderId ?? ""}
+                    onChange={(e) => {
+                      const id = e.target.value || null;
+                      setDriveFolderId(id);
+                      const found = driveFolders.find((f) => f.id === id);
+                      setDriveFolderName(found?.name || null);
+                    }}
+                  >
+                    <option value="">My Drive (root)</option>
+                    {driveFolders.map((f) => (
+                      <option key={f.id} value={f.id}>{f.name}</option>
+                    ))}
+                  </select>
+                )}
+                {driveFolderName && (
+                  <span className="text-xs text-gray-600">Folder: {driveFolderName}</span>
+                )}
+                {driveError && (
+                  <span className="text-xs text-red-600">{driveError}</span>
+                )}
+              </>
+            )}
+          </div>
           <div className="flex items-end gap-3">
             <div className="flex-1">
               <label className="block text-sm mb-1">Camera device</label>

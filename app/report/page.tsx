@@ -5,7 +5,16 @@ import { RECORDS_ENDPOINT } from "@/lib/config";
 
 type Remark = { text: string; ts: number };
 type ReportItem = { name: string; remarks: Remark[]; addedAt?: number };
-type ReportEntry = { items: ReportItem[]; sessionId?: string; videoExt?: string };
+type ReportEntry = {
+  items: ReportItem[];
+  sessionId?: string;
+  // Local storage
+  videoSource?: "local" | "drive";
+  videoExt?: string;
+  // Google Drive
+  driveFileId?: string | null;
+  driveWebViewLink?: string | null;
+};
 
 function formatOffset(ms: number): string {
   const total = Math.max(0, Math.floor((ms || 0) / 1000));
@@ -47,10 +56,13 @@ export default function ReportPage() {
   }, []);
 
   const selected = selectedKey ? records[selectedKey] : undefined;
-  const videoSrc = useMemo(() => {
-    if (!selected?.sessionId) return null;
+  const { videoSrc, driveLink } = useMemo(() => {
+    if (!selected?.sessionId) return { videoSrc: null as string | null, driveLink: null as string | null };
+    if ((selected.videoSource || "local") === "drive") {
+      return { videoSrc: null as string | null, driveLink: selected.driveWebViewLink || null };
+    }
     const ext = selected.videoExt || "webm";
-    return `/videos/${selected.sessionId}.${ext}`;
+    return { videoSrc: `/videos/${selected.sessionId}.${ext}`, driveLink: null as string | null };
   }, [selected]);
 
   const seekTo = (ms: number) => {
@@ -86,6 +98,10 @@ export default function ReportPage() {
           <div className="aspect-video w-full bg-black/80 rounded overflow-hidden flex items-center justify-center">
             {videoSrc ? (
               <video ref={videoRef} src={videoSrc} controls className="w-full h-full object-contain" />
+            ) : driveLink ? (
+              <a href={driveLink} target="_blank" rel="noreferrer" className="text-blue-600 underline">
+                Open video in Google Drive
+              </a>
             ) : (
               <div className="text-sm text-gray-400">No video for this session.</div>
             )}

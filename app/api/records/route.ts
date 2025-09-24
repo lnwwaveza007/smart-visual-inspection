@@ -1,22 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { API_BASE_URL, UPSTREAM_RECORDS_ENDPOINT } from "@/lib/config";
+import { getDb } from "@/lib/mongodb";
 
-// Normalize upstream payloads (object map or array) to an object keyed by id
-function normalizeToMap(input: unknown): Record<string, unknown> {
-  if (Array.isArray(input)) {
-    const array = input as Array<Record<string, unknown>>;
-    return Object.fromEntries(
-      array.map((r) => [String((r as { id: string }).id), { ...r, id: undefined }])
-    );
+type RecordsMap = Record<string, unknown>;
+
+function ensureObject(input: unknown): RecordsMap {
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    return input as RecordsMap;
   }
-  return (input as Record<string, unknown>) || {};
+  return {};
 }
 
 export async function GET() {
   try {
-    const res = await fetch(UPSTREAM_RECORDS_ENDPOINT, { cache: "no-store" });
-    const raw = res.ok ? await res.json() : {};
-    return NextResponse.json(normalizeToMap(raw));
+    const db = await getDb();
+    const collection = db.collection("records");
+    const docs = await collection.find({}).toArray();
+    const map = Object.fromEntries(
+      docs.map((d) => [String(d._id), (() => {
+        const { _id, ...rest } = d as Record<string, unknown>;
+        return rest;
+      })()])
+    );
+    return NextResponse.json(map);
   } catch (err: unknown) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Fetch failed" }, { status: 500 });
   }
@@ -24,46 +29,33 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
-    const body = await req.json();
-    // Try a direct PUT first (custom backend path)
-    const direct = await fetch(UPSTREAM_RECORDS_ENDPOINT, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (direct.ok) {
-      const raw = await direct.json().catch(() => ({}));
-      return NextResponse.json(normalizeToMap(raw));
+    const body = ensureObject(await req.json());
+    const db = await getDb();
+    const collection = db.collection("records");
+
+    const entries = Object.entries(body);
+    if (entries.length === 0) {
+      return NextResponse.json({});
     }
 
-    // Fallback for json-server: upsert each record by id
-    if (direct.status === 404 || direct.status === 405) {
-      const entries = Object.entries((body as Record<string, Record<string, unknown>>) || {});
-      for (const [id, value] of entries) {
-        const itemUrl = `${API_BASE_URL}/records/${encodeURIComponent(id)}`;
-        const getRes = await fetch(itemUrl, { cache: "no-store" });
-        if (getRes.ok) {
-          await fetch(itemUrl, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id, ...value }),
-          });
-        } else {
-          await fetch(`${API_BASE_URL}/records`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id, ...value }),
-          });
-        }
-      }
+    const operations = entries.map(([id, value]) => ({
+      updateOne: {
+        filter: { _id: id },
+        update: { $set: value },
+        upsert: true,
+      },
+    }));
+    await collection.bulkWrite(operations, { ordered: false });
 
-      // Return latest state
-      const finalRes = await fetch(UPSTREAM_RECORDS_ENDPOINT, { cache: "no-store" });
-      const raw = finalRes.ok ? await finalRes.json() : {};
-      return NextResponse.json(normalizeToMap(raw));
-    }
-
-    return NextResponse.json({ error: `Upstream error ${direct.status}` }, { status: direct.status });
+    // Return the latest state from the database
+    const docs = await collection.find({}).toArray();
+    const map = Object.fromEntries(
+      docs.map((d) => [String(d._id), (() => {
+        const { _id, ...rest } = d as Record<string, unknown>;
+        return rest;
+      })()])
+    );
+    return NextResponse.json(map);
   } catch (err: unknown) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Update failed" }, { status: 500 });
   }
