@@ -8,7 +8,12 @@
     "record": "Record",
     "report": "Report",
     "reportTable": "Report Table",
-    "table": "Table"
+    "table": "Table",
+    "language": "Language",
+    "thai": "Thai",
+    "english": "English",
+    "switchToThai": "TH",
+    "switchToEnglish": "EN"
   },
   "home": {
     "heading": "Smart Visual Inspection",

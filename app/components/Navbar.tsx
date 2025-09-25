@@ -1,5 +1,7 @@
+"use client";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import LanguageSwitcher from "./LanguageSwitcher";
 
 export default function Navbar() {
   const t = useTranslations("nav");
@@ -19,6 +21,14 @@ export default function Navbar() {
           <Link href="/record" className="hover:underline">{t("record")}</Link>
           <Link href="/report" className="hover:underline">{t("report")}</Link>
           <Link href="/report-table" className="hover:underline">{t("table")}</Link>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:block">
+            <LanguageSwitcher />
+          </div>
+          <div className="sm:hidden">
+            <LanguageSwitcher />
+          </div>
         </div>
       </nav>
     </header>
