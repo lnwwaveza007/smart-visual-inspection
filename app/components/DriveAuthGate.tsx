@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import Modal from "./Modal";
 
 export default function DriveAuthGate() {
+  const t = useTranslations("drive");
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +37,7 @@ export default function DriveAuthGate() {
       setError(null);
       const clientId = (process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID as string) || "";
       if (!clientId) {
-        setError("Missing NEXT_PUBLIC_GOOGLE_CLIENT_ID");
+        setError(t("missingClientId"));
         return;
       }
       // Load GIS if needed
@@ -60,7 +62,7 @@ export default function DriveAuthGate() {
       const googleGlobal = (window as unknown as { google?: GoogleGlobal }).google;
       const oauth2 = googleGlobal?.accounts?.oauth2;
       if (!oauth2?.initTokenClient) {
-        setError("Google auth unavailable");
+        setError(t("unavailable"));
         return;
       }
       const scopes = [
@@ -184,21 +186,21 @@ export default function DriveAuthGate() {
   return (
     <Modal
       open={!authed && modalOpen}
-      title="Connect Google Drive"
+      title={t("connectTitle")}
       onClose={() => setModalOpen(false)}
       footer={(
         <>
           <button type="button" className="px-3 py-1.5 rounded border" onClick={() => setModalOpen(false)} disabled={busy}>
-            Not now
+            {t("notNow")}
           </button>
           <button type="button" className="px-3 py-1.5 rounded bg-blue-600 text-white" onClick={ensureDriveToken} disabled={busy}>
-            {busy ? "Signing in…" : "Sign in to Drive"}
+            {busy ? t("signingIn") : t("signIn")}
           </button>
         </>
       )}
     >
       <div className="space-y-2 text-sm">
-        <p>Sign in to Google Drive to enable folder browsing and inline video playback.</p>
+        <p>{t("explain")}</p>
         {error && <p className="text-red-600">{error}</p>}
       </div>
     </Modal>

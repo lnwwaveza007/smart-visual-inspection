@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTranslations } from "next-intl";
 
 type ModalProps = {
   open: boolean;
@@ -12,6 +13,7 @@ type ModalProps = {
 };
 
 export default function Modal({ open, title, onClose, children, footer, widthClassName = "max-w-lg" }: ModalProps) {
+  const t = useTranslations("modal");
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -36,7 +38,7 @@ export default function Modal({ open, title, onClose, children, footer, widthCla
           <div className="font-medium">{title}</div>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t("ariaClose")}
             className="text-gray-500 hover:text-gray-700"
             onClick={onClose}
           >

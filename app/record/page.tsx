@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { RECORDS_ENDPOINT } from "@/lib/config";
 import Modal from "@/app/components/Modal";
 // Camera is for preview only; barcode scanned via hardware input
@@ -51,6 +52,7 @@ function formatOffset(ms: number): string {
 }
 
 export default function RecordPage() {
+  const t = useTranslations("record");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -622,12 +624,12 @@ export default function RecordPage() {
   const rightPanelContent = (() => {
     if (!isRecording) {
       return (
-        <div className="text-sm text-gray-500">Start a session to add items.</div>
+        <div className="text-sm text-gray-500">{t("startSessionToAdd")}</div>
       );
     }
     if (sessionItemIds.length === 0) {
       return (
-        <div className="text-sm text-gray-500">No items yet. Enter an item name and click Add item.</div>
+        <div className="text-sm text-gray-500">{t("noItemsYet")}</div>
       );
     }
     return (
@@ -638,7 +640,7 @@ export default function RecordPage() {
           return (
             <div key={id} className={`border rounded p-3 ${activeBarcode === id ? "border-gray-800" : "border-gray-200"}`}>
               <div className="flex items-center justify-between">
-                <div className="font-medium">{rec.name || "(unnamed)"}</div>
+                <div className="font-medium">{rec.name || t("unnamed")}</div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -647,7 +649,7 @@ export default function RecordPage() {
                   >
                     Select
                   </button>
-                  <div className="text-xs text-gray-500">{rec.remarks.length} remarks</div>
+                  <div className="text-xs text-gray-500">{rec.remarks.length} {t("remarksCount")}</div>
                 </div>
               </div>
               {rec.remarks.length > 0 && (
@@ -669,7 +671,7 @@ export default function RecordPage() {
 
   return (
     <div className="p-4 md:p-6 lg:p-8">
-      <h1 className="text-xl font-semibold">Record</h1>
+      <h1 className="text-xl font-semibold">{t("title")}</h1>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {!isRecording ? (
           <button
@@ -678,7 +680,7 @@ export default function RecordPage() {
             className="px-4 py-2 rounded bg-green-600 text-white disabled:bg-gray-300"
             disabled={serverSaving || savingToDrive}
           >
-            Start record
+            {t("start")}
           </button>
         ) : (
           <button
@@ -687,16 +689,16 @@ export default function RecordPage() {
             className="px-4 py-2 rounded bg-red-600 text-white disabled:bg-gray-300"
             disabled={serverSaving || savingToDrive}
           >
-            Stop & Save
+            {t("stopSave")}
           </button>
         )}
         {isRecording && (
-          <span className="text-sm text-red-600">Recording… Session: {sessionId}</span>
+          <span className="text-sm text-red-600">{t("recording")} {sessionId}</span>
         )}
         {savingToDrive && storageMode === "drive" && (
-          <span className="text-sm text-blue-700">Saving video to Google Drive… Please keep this tab open.</span>
+          <span className="text-sm text-blue-700">{t("savingServer")}</span>
         )}
-        {serverSaving && <span className="text-sm text-gray-600">Saving to server…</span>}
+        {serverSaving && <span className="text-sm text-gray-600">{t("savingServer")}</span>}
         {serverError && <span className="text-sm text-red-600">{serverError}</span>}
       </div>
       <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -704,7 +706,7 @@ export default function RecordPage() {
         <div>
           {/* Storage selection */}
           <div className="mb-3 flex flex-wrap items-center gap-3">
-            <label className="text-sm">Storage:</label>
+            <label className="text-sm">{t("storage")}</label>
             <label className="text-sm flex items-center gap-1">
               <input
                 type="radio"
@@ -713,7 +715,7 @@ export default function RecordPage() {
                 checked={storageMode === "local"}
                 onChange={() => setStorageMode("local")}
               />
-              Local
+              {t("local")}
             </label>
             <label className="text-sm flex items-center gap-1">
               <input
@@ -723,7 +725,7 @@ export default function RecordPage() {
                 checked={storageMode === "drive"}
                 onChange={() => setStorageMode("drive")}
               />
-              Google Drive
+              {t("googleDrive")}
             </label>
             {storageMode === "drive" && (
               <>
@@ -737,7 +739,7 @@ export default function RecordPage() {
                       onClick={() => ensureDriveToken(true)}
                       disabled={serverSaving || savingToDrive}
                     >
-                      Sign in to Drive
+                      {t("signIn")}
                     </button>
                   ) : (
                     <button
@@ -746,12 +748,12 @@ export default function RecordPage() {
                       onClick={openFolderModal}
                       disabled={serverSaving || savingToDrive}
                     >
-                      Browse folders
+                      {t("browseFolders")}
                     </button>
                   );
                 })()}
                 <span className="text-xs text-gray-600">
-                  Folder: {driveFolderName ? driveFolderName : "My Drive (root)"}
+                  {t("folder")} {driveFolderName ? driveFolderName : t("rootLabel")}
                 </span>
                 {driveError && (
                   <span className="text-xs text-red-600">{driveError}</span>
@@ -761,7 +763,7 @@ export default function RecordPage() {
           </div>
           <div className="flex items-end gap-3">
             <div className="flex-1">
-              <label className="block text-sm mb-1">Camera device</label>
+              <label className="block text-sm mb-1">{t("cameraDevice")}</label>
               <select
                 className="w-full border border-gray-300 rounded px-3 py-2 bg-white disabled:bg-gray-100"
                 value={selectedDeviceId ?? ""}
@@ -769,11 +771,11 @@ export default function RecordPage() {
                 disabled={cameraDisabled}
               >
                 {cameraDevices.length === 0 ? (
-                  <option value="">Default camera</option>
+                  <option value="">{t("defaultCamera")}</option>
                 ) : (
                   cameraDevices.map((d) => (
                     <option key={d.deviceId} value={d.deviceId}>
-                      {d.label || "Camera"}
+                      {d.label || t("camera")}
                     </option>
                   ))
                 )}
@@ -785,7 +787,7 @@ export default function RecordPage() {
               className="px-3 py-2 rounded border"
               disabled={cameraDisabled}
             >
-              Refresh
+              {t("refresh")}
             </button>
             <label className="text-sm flex items-center gap-2 border rounded px-3 py-2">
               <input
@@ -812,9 +814,9 @@ export default function RecordPage() {
             {cameraError ? (
               <span className="text-red-600">{cameraError}</span>
             ) : cameraActive ? (
-              <span>Camera is active (preview only).</span>
+              <span>{t("cameraActive")}</span>
             ) : (
-              <span>{cameraDisabled ? "Camera disabled for testing." : "Starting camera…"}</span>
+              <span>{cameraDisabled ? t("cameraDisabledTesting") : t("startingCamera")}</span>
             )}
           </div>
 
@@ -822,24 +824,24 @@ export default function RecordPage() {
           {isRecording && (
             <div className="mt-4 space-y-3">
               <div>
-                <label className="block text-sm mb-1">Session name</label>
+                <label className="block text-sm mb-1">{t("sessionName")}</label>
                 <input
                   type="text"
                   value={sessionNameInput}
                   onChange={(e) => setSessionNameInput(e.target.value)}
-                  placeholder="Enter session name"
+                  placeholder={t("sessionNamePlaceholder")}
                   className="w-full border border-gray-300 rounded px-3 py-2"
                 />
               </div>
 
               <div>
-                <label className="block text-sm mb-1">New item name</label>
+                <label className="block text-sm mb-1">{t("newItemName")}</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={nameInput}
                     onChange={(e) => setNameInput(e.target.value)}
-                    placeholder={sessionNameInput.trim() ? "Type item name" : "Enter session name first"}
+                    placeholder={sessionNameInput.trim() ? t("itemNamePlaceholder") : t("enterSessionFirst")}
                     disabled={!sessionNameInput.trim()}
                     className="flex-1 border border-gray-300 rounded px-3 py-2 disabled:bg-gray-100 disabled:text-gray-500"
                     onKeyDown={(e) => {
@@ -855,7 +857,7 @@ export default function RecordPage() {
                     disabled={!sessionNameInput.trim() || !nameInput.trim()}
                     className="px-4 py-2 rounded bg-blue-600 text-white disabled:bg-gray-300"
                   >
-                    Add item
+                    {t("addItem")}
                   </button>
                 </div>
               </div>
@@ -864,13 +866,13 @@ export default function RecordPage() {
 
           <div className="mt-4 space-y-3">
             <div>
-              <label className="block text-sm mb-1">Add remark</label>
+              <label className="block text-sm mb-1">{t("addRemark")}</label>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={remarkInput}
                   onChange={(e) => setRemarkInput(e.target.value)}
-                  placeholder={activeBarcode ? "Type remark and press Add" : "Add an item first"}
+                  placeholder={activeBarcode ? t("remarkPlaceholder") : t("addAnItemFirst")}
                   disabled={!isRecording || !activeBarcode}
                   className="flex-1 border border-gray-300 rounded px-3 py-2 disabled:bg-gray-100 disabled:text-gray-500"
                   onFocus={(e) => {
@@ -891,7 +893,7 @@ export default function RecordPage() {
                   disabled={!isRecording || !activeBarcode || !(activeRecord?.name?.trim()) || !remarkInput.trim()}
                   className="px-4 py-2 rounded bg-gray-900 text-white disabled:bg-gray-300"
                 >
-                  Add
+                  {t("add")}
                 </button>
               </div>
             </div>
@@ -899,10 +901,10 @@ export default function RecordPage() {
             <div className="text-xs text-gray-500">
               {activeBarcode ? (
                 <span>
-                  Active item: <span className="font-mono">{activeBarcode}</span>. Use Start/Stop to control the session.
+                  {t("activeItem")} <span className="font-mono">{activeBarcode}</span>. Use Start/Stop to control the session.
                 </span>
               ) : (
-                <span>No active item.</span>
+                <span>{t("noActiveItem")}</span>
               )}
             </div>
           </div>
@@ -910,17 +912,15 @@ export default function RecordPage() {
 
         {/* Right: History */}
         <div className="border border-gray-200 rounded p-4 bg-white/50">
-          <h2 className="text-lg font-medium">Item history</h2>
+          <h2 className="text-lg font-medium">{t("itemHistory")}</h2>
           <div className="mt-3">{rightPanelContent}</div>
         </div>
       </div>
       {(savingToDrive || (serverSaving && storageMode === "drive")) && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
           <div className="bg-white rounded shadow p-6 max-w-sm text-center">
-            <div className="text-base font-medium mb-1">Please wait…</div>
-            <div className="text-sm text-gray-700">
-              {savingToDrive ? "Saving video to Google Drive. Do not close this tab." : "Finalizing save. Do not close this tab."}
-            </div>
+            <div className="text-base font-medium mb-1">{t("pleaseWait")}</div>
+            <div className="text-sm text-gray-700">{savingToDrive ? t("savingToDrive") : t("finalizing")}</div>
           </div>
         </div>
       )}
@@ -992,18 +992,18 @@ function DriveFolderModal({
   return (
     <Modal
       open={open}
-      title="Select Google Drive Folder"
+      title={useTranslations("drive")("selectFolderTitle")}
       onClose={onCancel}
       footer={(
         <>
-          <button type="button" className="px-3 py-1.5 rounded border" onClick={onCancel}>Cancel</button>
-          <button type="button" className="px-3 py-1.5 rounded bg-blue-600 text-white" onClick={onSelectHere}>Select this folder</button>
+          <button type="button" className="px-3 py-1.5 rounded border" onClick={onCancel}>{useTranslations("drive")("cancel")}</button>
+          <button type="button" className="px-3 py-1.5 rounded bg-blue-600 text-white" onClick={onSelectHere}>{useTranslations("drive")("selectThisFolder")}</button>
         </>
       )}
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2 text-sm text-gray-600">
-          <span className="text-gray-500">Location:</span>
+          <span className="text-gray-500">{useTranslations("drive")("location")}</span>
           <nav className="flex items-center gap-1 flex-wrap">
             {path.map((p, idx) => (
               <span key={p.id + idx} className="flex items-center gap-1">
@@ -1020,14 +1020,14 @@ function DriveFolderModal({
           </nav>
         </div>
         <button type="button" className="px-2 py-1 text-sm rounded border" onClick={onRefresh} disabled={loading}>
-          {loading ? "Loading…" : "Refresh"}
+          {loading ? useTranslations("drive")("loading") : useTranslations("drive")("refresh")}
         </button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
         {loading ? (
-          <div className="text-sm text-gray-500">Loading…</div>
+          <div className="text-sm text-gray-500">{useTranslations("drive")("loading")}</div>
         ) : items.length === 0 ? (
-          <div className="text-sm text-gray-500">No folders in this location.</div>
+          <div className="text-sm text-gray-500">{useTranslations("drive")("noFolders")}</div>
         ) : (
           items.map((f) => (
             <button

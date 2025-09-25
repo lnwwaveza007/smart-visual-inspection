@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Navbar from "./components/Navbar";
 import DriveAuthGate from "./components/DriveAuthGate";
+import { NextIntlClientProvider } from "next-intl";
+import { getMessages } from "next-intl/server";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -19,21 +21,24 @@ export const metadata: Metadata = {
   description: "Smart Visual Inspection",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const messages = await getMessages();
   return (
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <DriveAuthGate />
-        <Navbar />
-        <div className="max-w-6xl mx-auto px-4 md:px-6 lg:px-8">
-          {children}
-        </div>
+        <NextIntlClientProvider messages={messages}>
+          <DriveAuthGate />
+          <Navbar />
+          <div className="max-w-6xl mx-auto px-4 md:px-6 lg:px-8">
+            {children}
+          </div>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

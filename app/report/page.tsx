@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { RECORDS_ENDPOINT } from "@/lib/config";
 
 type Remark = { text: string; ts: number };
@@ -24,6 +25,7 @@ function formatOffset(ms: number): string {
 }
 
 export default function ReportPage() {
+  const t = useTranslations("report");
   const [records, setRecords] = useState<Record<string, ReportEntry>>({});
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -44,7 +46,7 @@ export default function ReportPage() {
         setSelectedKey(firstKey);
       } catch (err: unknown) {
         if (!alive) return;
-        setError(err instanceof Error ? err.message : "Failed to load");
+        setError(err instanceof Error ? err.message : t("errorLoading"));
       } finally {
         if (alive) setLoading(false);
       }
@@ -76,7 +78,7 @@ export default function ReportPage() {
 
   return (
     <div className="p-4 md:p-6 lg:p-8">
-      <h1 className="text-xl font-semibold">Report</h1>
+      <h1 className="text-xl font-semibold">{t("title")}</h1>
       <div className="mt-3 flex items-center gap-3">
         <select
           className="border border-gray-300 rounded px-3 py-2 bg-white"
@@ -84,14 +86,14 @@ export default function ReportPage() {
           onChange={(e) => setSelectedKey(e.target.value || null)}
         >
           {Object.keys(records).length === 0 ? (
-            <option value="">No sessions</option>
+            <option value="">{t("noSessions")}</option>
           ) : (
             Object.keys(records).map((key) => (
               <option key={key} value={key}>{key}</option>
             ))
           )}
         </select>
-        {loading && <span className="text-sm text-gray-600">Loading…</span>}
+        {loading && <span className="text-sm text-gray-600">{t("loading")}</span>}
         {error && <span className="text-sm text-red-600">{error}</span>}
       </div>
 
@@ -101,22 +103,22 @@ export default function ReportPage() {
             {videoSrc ? (
               <video ref={videoRef} src={videoSrc} controls className="w-full h-full object-contain" />
             ) : (
-              <div className="text-sm text-gray-400">No video for this session.</div>
+              <div className="text-sm text-gray-400">{t("noVideo")}</div>
             )}
           </div>
           <div className="mt-2 text-xs text-gray-500">
             {selected?.sessionId ? (
-              <span>Session: <span className="font-mono">{selected.sessionId}</span></span>
+              <span>{t("session")} <span className="font-mono">{selected.sessionId}</span></span>
             ) : (
-              <span>Select a session to view.</span>
+              <span>{t("selectASession")}</span>
             )}
           </div>
         </div>
 
         <div className="border border-gray-200 rounded p-4 bg-white/50">
-          <h2 className="text-lg font-medium">Remark history</h2>
+          <h2 className="text-lg font-medium">{t("remarkHistory")}</h2>
           {!selected ? (
-            <div className="mt-3 text-sm text-gray-500">No session selected.</div>
+            <div className="mt-3 text-sm text-gray-500">{t("noSessionSelected")}</div>
           ) : selected.items?.length ? (
             <div className="mt-3 space-y-4 max-h-[70vh] overflow-auto pr-2">
               {selected.items.map((it, idx) => (
@@ -149,13 +151,13 @@ export default function ReportPage() {
                       ))}
                     </ul>
                   ) : (
-                    <div className="text-sm text-gray-500">No remarks.</div>
+                    <div className="text-sm text-gray-500">{t("noRemarks")}</div>
                   )}
                 </div>
               ))}
             </div>
           ) : (
-            <div className="mt-3 text-sm text-gray-500">No items.</div>
+            <div className="mt-3 text-sm text-gray-500">{t("noItems")}</div>
           )}
         </div>
       </div>
