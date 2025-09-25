@@ -56,13 +56,15 @@ export default function ReportPage() {
   }, []);
 
   const selected = selectedKey ? records[selectedKey] : undefined;
-  const { videoSrc, driveLink } = useMemo(() => {
+  const { videoSrc } = useMemo(() => {
     if (!selected?.sessionId) return { videoSrc: null as string | null, driveLink: null as string | null };
     if ((selected.videoSource || "local") === "drive") {
-      return { videoSrc: null as string | null, driveLink: selected.driveWebViewLink || null };
+      const fileId = selected.driveFileId || null;
+      const src = fileId ? `/api/drive/stream?fileId=${encodeURIComponent(fileId)}` : null;
+      return { videoSrc: src } as { videoSrc: string | null };
     }
     const ext = selected.videoExt || "webm";
-    return { videoSrc: `/videos/${selected.sessionId}.${ext}`, driveLink: null as string | null };
+    return { videoSrc: `/videos/${selected.sessionId}.${ext}` } as { videoSrc: string | null };
   }, [selected]);
 
   const seekTo = (ms: number) => {
@@ -98,10 +100,6 @@ export default function ReportPage() {
           <div className="aspect-video w-full bg-black/80 rounded overflow-hidden flex items-center justify-center">
             {videoSrc ? (
               <video ref={videoRef} src={videoSrc} controls className="w-full h-full object-contain" />
-            ) : driveLink ? (
-              <a href={driveLink} target="_blank" rel="noreferrer" className="text-blue-600 underline">
-                Open video in Google Drive
-              </a>
             ) : (
               <div className="text-sm text-gray-400">No video for this session.</div>
             )}

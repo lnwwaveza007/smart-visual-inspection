@@ -225,6 +225,17 @@ export default function RecordPage() {
               setDriveTokenExpiryMs(Date.now() + expiresInSec * 1000);
               setDriveError(null);
               token.value = resp.access_token || null;
+              // Persist token to httpOnly cookie for server-side Drive streaming
+              try {
+                const t = resp.access_token || "";
+                if (t) {
+                  void fetch("/api/drive/token", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ accessToken: t, expiresInSec }),
+                  });
+                }
+              } catch {}
             }
             resolve();
           },
@@ -889,12 +900,6 @@ export default function RecordPage() {
             .finally(() => setExplorerLoading(false));
         }}
         onCancel={() => setFolderModalOpen(false)}
-        onClear={() => {
-          setDriveFolderId(null);
-          setDriveFolderName(null);
-          setExplorerPath([{ id: "", name: "My Drive" }]);
-          setFolderModalOpen(false);
-        }}
         onSelectHere={() => {
           const current = explorerPath.at(-1);
           const id = current && current.id ? current.id : null;
@@ -917,7 +922,6 @@ function DriveFolderModal({
   onUpTo,
   onRefresh,
   onCancel,
-  onClear,
   onSelectHere,
 }: {
   open: boolean;
@@ -928,7 +932,6 @@ function DriveFolderModal({
   onUpTo: (index: number) => void;
   onRefresh: () => void;
   onCancel: () => void;
-  onClear: () => void;
   onSelectHere: () => void;
 }) {
   return (
