@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
+import { ObjectId, AnyBulkWriteOperation } from "mongodb";
 
 type RecordsMap = Record<string, unknown>;
+type RecordDoc = { _id: ObjectId | string } & Record<string, unknown>;
 
 function ensureObject(input: unknown): RecordsMap {
   if (input && typeof input === "object" && !Array.isArray(input)) {
@@ -13,7 +15,7 @@ function ensureObject(input: unknown): RecordsMap {
 export async function GET() {
   try {
     const db = await getDb();
-    const collection = db.collection("records");
+    const collection = db.collection<RecordDoc>("records");
     const docs = await collection.find({}).toArray();
     const map = Object.fromEntries(
       docs.map((d) => [String(d._id), (() => {
@@ -31,20 +33,24 @@ export async function PUT(req: NextRequest) {
   try {
     const body = ensureObject(await req.json());
     const db = await getDb();
-    const collection = db.collection("records");
+    const collection = db.collection<RecordDoc>("records");
 
     const entries = Object.entries(body);
     if (entries.length === 0) {
       return NextResponse.json({});
     }
 
-    const operations = entries.map(([id, value]) => ({
-      updateOne: {
-        filter: { _id: id },
-        update: { $set: value },
-        upsert: true,
-      },
-    }));
+    const operations: AnyBulkWriteOperation<RecordDoc>[] = entries.map(([id, value]) => {
+      const _id = ObjectId.isValid(id) ? new ObjectId(id) : id;
+      const updateValue = ensureObject(value) as Partial<RecordDoc>;
+      return {
+        updateOne: {
+          filter: { _id },
+          update: { $set: updateValue },
+          upsert: true,
+        },
+      };
+    });
     await collection.bulkWrite(operations, { ordered: false });
 
     // Return the latest state from the database
