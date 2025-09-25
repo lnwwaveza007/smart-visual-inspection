@@ -80,6 +80,8 @@ export default function RecordPage() {
   const [driveFolderName, setDriveFolderName] = useState<string | null>(null);
   // legacy inline select removed in favor of explorer modal
   const [driveError, setDriveError] = useState<string | null>(null);
+  const [driveAuthed, setDriveAuthed] = useState(false);
+  const [driveAuthChecked, setDriveAuthChecked] = useState(false);
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   // Explorer state
   const [explorerPath, setExplorerPath] = useState<Array<{ id: string; name: string }>>([{ id: "", name: "My Drive" }]);
@@ -233,7 +235,7 @@ export default function RecordPage() {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ accessToken: t, expiresInSec }),
-                  });
+                  }).then(() => setDriveAuthed(true));
                 }
               } catch {}
             }
@@ -249,18 +251,34 @@ export default function RecordPage() {
     }
   }
 
+  // Check cookie-based auth so we can hide sign-in button if already logged in
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const res = await fetch("/api/drive/status", { cache: "no-store" });
+        const json = await res.json();
+        if (!alive) return;
+        const ok = Boolean(json?.authed);
+        setDriveAuthed(ok);
+        setDriveAuthChecked(true);
+      } catch {
+        if (!alive) return;
+        setDriveAuthed(false);
+        setDriveAuthChecked(true);
+      }
+    };
+    check();
+    return () => { alive = false; };
+  }, []);
+
   async function listDriveFolders(parentId: string | null): Promise<Array<{ id: string; name: string }>> {
     try {
-      const token = await ensureDriveToken(true);
-      if (!token) return [];
-      const parentExpr = parentId ? `'${parentId}' in parents` : `'root' in parents`;
-      const q = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and trashed=false and ${parentExpr}`);
-      const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=200`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const url = `/api/drive/list${parentId ? `?parentId=${encodeURIComponent(parentId)}` : ""}`;
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error(`Drive list failed ${res.status}`);
-      const data = (await res.json()) as { files?: Array<{ id: string; name: string }>} ;
-      return data.files || [];
+      const data = (await res.json()) as { folders?: Array<{ id: string; name: string }>} ;
+      return data.folders || [];
     } catch (e) {
       setDriveError(e instanceof Error ? e.message : "Failed to list folders");
       return [];
@@ -690,23 +708,27 @@ export default function RecordPage() {
             </label>
             {storageMode === "drive" && (
               <>
-                {!driveAccessToken ? (
-                  <button
-                    type="button"
-                    className="px-3 py-1.5 rounded border"
-                    onClick={() => ensureDriveToken(true)}
-                  >
-                    Sign in to Drive
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="px-3 py-1.5 rounded border"
-                    onClick={openFolderModal}
-                  >
-                    Browse folders
-                  </button>
-                )}
+                {(() => {
+                  const isReady = Boolean(driveAuthed || driveAccessToken);
+                  if (!driveAuthChecked) return null;
+                  return !isReady ? (
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded border"
+                      onClick={() => ensureDriveToken(true)}
+                    >
+                      Sign in to Drive
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded border"
+                      onClick={openFolderModal}
+                    >
+                      Browse folders
+                    </button>
+                  );
+                })()}
                 <span className="text-xs text-gray-600">
                   Folder: {driveFolderName ? driveFolderName : "My Drive (root)"}
                 </span>
