@@ -28,6 +28,7 @@ export default function ReportTablePage() {
   const [records, setRecords] = useState<Record<string, ReportEntry>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -51,6 +52,31 @@ export default function ReportTablePage() {
       alive = false;
     };
   }, []);
+
+  const handleDelete = async (sessionKey: string) => {
+    if (!sessionKey) return;
+    const ok = confirm(`Delete record "${sessionKey}"? This cannot be undone.`);
+    if (!ok) return;
+    setDeleting(sessionKey);
+    setError(null);
+    try {
+      const url = `${RECORDS_ENDPOINT}?id=${encodeURIComponent(sessionKey)}`;
+      const res = await fetch(url, { method: "DELETE" });
+      if (!res.ok) {
+        const msg = (await res.json().catch(() => ({}))).error || `Failed to delete (${res.status})`;
+        throw new Error(msg);
+      }
+      setRecords((prev) => {
+        const next = { ...(prev || {}) } as Record<string, ReportEntry>;
+        delete next[sessionKey];
+        return next;
+      });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   const sessionRows = useMemo(() => {
     return Object.entries(records || {}).map(([key, entry]) => {
@@ -87,12 +113,13 @@ export default function ReportTablePage() {
               <th className="text-left px-3 py-2">Items</th>
               <th className="text-left px-3 py-2">Remarks</th>
               <th className="text-left px-3 py-2">Video</th>
+              <th className="text-left px-3 py-2 w-24">Actions</th>
             </tr>
           </thead>
           <tbody>
             {sessionRows.length === 0 ? (
               <tr>
-                <td className="px-3 py-3 text-gray-500" colSpan={4}>No records</td>
+                <td className="px-3 py-3 text-gray-500" colSpan={5}>No records</td>
               </tr>
             ) : (
               sessionRows.map((row, idx) => (
@@ -144,6 +171,16 @@ export default function ReportTablePage() {
                     ) : (
                       <span className="text-gray-500">-</span>
                     )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      className="text-red-700 border border-red-300 hover:bg-red-50 rounded px-3 py-1 text-xs disabled:opacity-50"
+                      onClick={() => handleDelete(row.sessionKey)}
+                      disabled={deleting === row.sessionKey}
+                    >
+                      {deleting === row.sessionKey ? "Deleting…" : "Delete"}
+                    </button>
                   </td>
                 </tr>
               ))

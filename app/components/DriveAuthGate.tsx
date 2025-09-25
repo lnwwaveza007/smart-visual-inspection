@@ -50,7 +50,7 @@ export default function DriveAuthGate() {
           document.head.appendChild(script);
         });
       }
-      type TokenClient = { requestAccessToken: () => void };
+      type TokenClient = { requestAccessToken: (opts?: { prompt?: string }) => void };
       interface GoogleGlobal { accounts?: { oauth2?: { initTokenClient?: (args: {
         client_id: string;
         scope: string;
@@ -101,6 +101,84 @@ export default function DriveAuthGate() {
       setBusy(false);
     }
   }
+
+  // Silent refresh: try to refresh token without re-prompt periodically
+  useEffect(() => {
+    let stop = false;
+    let refreshTimer: number | null = null;
+
+    const setupSilentRefresh = async () => {
+      const clientId = (process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID as string) || "";
+      if (!clientId) return;
+      if (!(window as unknown as { google?: unknown }).google) {
+        await new Promise<void>((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = "https://accounts.google.com/gsi/client";
+          s.async = true;
+          s.defer = true;
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error("Failed to load Google script"));
+          document.head.appendChild(s);
+        });
+      }
+      type TokenClient = { requestAccessToken: (opts?: { prompt?: string }) => void };
+      interface GoogleGlobal { accounts?: { oauth2?: { initTokenClient?: (args: {
+        client_id: string;
+        scope: string;
+        prompt?: string;
+        callback: (resp: { access_token?: string; expires_in?: number; error?: string }) => void;
+      }) => TokenClient } } }
+      const googleGlobal = (window as unknown as { google?: GoogleGlobal }).google;
+      const oauth2 = googleGlobal?.accounts?.oauth2;
+      if (!oauth2?.initTokenClient) return;
+      const scopes = [
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/drive.metadata.readonly",
+      ].join(" ");
+
+      const client = oauth2.initTokenClient!({
+        client_id: clientId,
+        scope: scopes,
+        prompt: "none",
+        callback: (resp: { access_token?: string; expires_in?: number; error?: string }) => {
+          if (resp?.access_token) {
+            const expiresInSec = Math.max(1, Number(resp?.expires_in || 300));
+            void fetch("/api/drive/token", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ accessToken: resp.access_token, expiresInSec }),
+            }).then(() => {
+              setAuthed(true);
+            }).catch(() => {});
+          }
+        },
+      });
+
+      const schedule = () => {
+        // Refresh every 4 minutes to keep cookie alive (server stores maxAge given)
+        const intervalMs = 4 * 60 * 1000;
+        if (refreshTimer) window.clearInterval(refreshTimer);
+        refreshTimer = window.setInterval(() => {
+          if (stop) return;
+          try {
+            client.requestAccessToken({ prompt: "none" });
+          } catch {}
+        }, intervalMs);
+      };
+
+      schedule();
+    };
+
+    // Only set up when authed (we have a cookie) to avoid unnecessary prompts
+    if (authed) {
+      void setupSilentRefresh();
+    }
+
+    return () => {
+      stop = true;
+      if (refreshTimer) window.clearInterval(refreshTimer);
+    };
+  }, [authed]);
 
   if (authed === null) return null;
   return (

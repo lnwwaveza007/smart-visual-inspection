@@ -71,6 +71,7 @@ export default function RecordPage() {
   const [sessionNameInput, setSessionNameInput] = useState("");
   const [serverSaving, setServerSaving] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [savingToDrive, setSavingToDrive] = useState(false);
 
   // Storage selection and Google Drive auth state
   const [storageMode, setStorageMode] = useState<"local" | "drive">("local");
@@ -105,6 +106,18 @@ export default function RecordPage() {
       localStorage.setItem(CAMERA_DISABLED_KEY, cameraDisabled ? "1" : "0");
     } catch {}
   }, [cameraDisabled]);
+
+  // Prevent closing/tab navigation while saving
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (savingToDrive || serverSaving) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [savingToDrive, serverSaving]);
 
   // legacy scan state removed; manual item flow in use
 
@@ -299,26 +312,27 @@ export default function RecordPage() {
 
   async function uploadVideoToDrive(blob: Blob, filename: string, mimeType: string, folderId?: string | null): Promise<{ id: string; webViewLink?: string; webContentLink?: string } | null> {
     try {
-      const token = await ensureDriveToken(true);
-      if (!token) return null;
-      const metadata = {
-        name: filename,
-        mimeType,
-        parents: folderId ? [folderId] : undefined,
-      } as Record<string, unknown>;
-      const boundary = `-------svi-${Math.random().toString(36).slice(2)}`;
-      const bodyParts = [
-        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` + JSON.stringify(metadata) + "\r\n",
-        `--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
-        new Uint8Array(await blob.arrayBuffer()),
-        `\r\n--${boundary}--\r\n`,
-      ];
-      const multipartBody = new Blob(bodyParts as BlobPart[], { type: `multipart/related; boundary=${boundary}` });
-      const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,webContentLink", {
+      // Try server-side upload using cookie token (no re-login prompt)
+      const params = new URLSearchParams({ name: filename });
+      if (folderId) params.set("parentId", folderId);
+      const res = await fetch(`/api/drive/upload?${params.toString()}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: multipartBody,
+        headers: { "Content-Type": mimeType },
+        body: blob,
       });
+      if (res.status === 401) {
+        // No cookie token; request interactive login once then retry
+        const token = await ensureDriveToken(true);
+        if (!token) return null;
+        const retry = await fetch(`/api/drive/upload?${params.toString()}`, {
+          method: "POST",
+          headers: { "Content-Type": mimeType },
+          body: blob,
+        });
+        if (!retry.ok) throw new Error(`Drive upload failed ${retry.status}`);
+        const json = await retry.json();
+        return json as { id: string; webViewLink?: string; webContentLink?: string };
+      }
       if (!res.ok) throw new Error(`Drive upload failed ${res.status}`);
       const json = await res.json();
       return json as { id: string; webViewLink?: string; webContentLink?: string };
@@ -489,6 +503,7 @@ export default function RecordPage() {
         const ext = mimeType.includes("webm") ? "webm" : mimeType.includes("mp4") ? "mp4" : "webm";
         persistedVideoExt = ext;
         if (storageMode === "drive") {
+          setSavingToDrive(true);
           const filename = `${id}.${ext}`;
           driveFile = await uploadVideoToDrive(blob, filename, mimeType, driveFolderId);
         } else {
@@ -504,6 +519,7 @@ export default function RecordPage() {
     } finally {
       mediaRecorderRef.current = null;
       recordedChunksRef.current = [];
+      setSavingToDrive(false);
     }
 
     setServerSaving(true);
@@ -660,7 +676,7 @@ export default function RecordPage() {
             type="button"
             onClick={startSession}
             className="px-4 py-2 rounded bg-green-600 text-white disabled:bg-gray-300"
-            disabled={serverSaving}
+            disabled={serverSaving || savingToDrive}
           >
             Start record
           </button>
@@ -669,13 +685,16 @@ export default function RecordPage() {
             type="button"
             onClick={stopSession}
             className="px-4 py-2 rounded bg-red-600 text-white disabled:bg-gray-300"
-            disabled={serverSaving}
+            disabled={serverSaving || savingToDrive}
           >
             Stop & Save
           </button>
         )}
         {isRecording && (
           <span className="text-sm text-red-600">Recording… Session: {sessionId}</span>
+        )}
+        {savingToDrive && storageMode === "drive" && (
+          <span className="text-sm text-blue-700">Saving video to Google Drive… Please keep this tab open.</span>
         )}
         {serverSaving && <span className="text-sm text-gray-600">Saving to server…</span>}
         {serverError && <span className="text-sm text-red-600">{serverError}</span>}
@@ -716,6 +735,7 @@ export default function RecordPage() {
                       type="button"
                       className="px-3 py-1.5 rounded border"
                       onClick={() => ensureDriveToken(true)}
+                      disabled={serverSaving || savingToDrive}
                     >
                       Sign in to Drive
                     </button>
@@ -724,6 +744,7 @@ export default function RecordPage() {
                       type="button"
                       className="px-3 py-1.5 rounded border"
                       onClick={openFolderModal}
+                      disabled={serverSaving || savingToDrive}
                     >
                       Browse folders
                     </button>
@@ -893,6 +914,16 @@ export default function RecordPage() {
           <div className="mt-3">{rightPanelContent}</div>
         </div>
       </div>
+      {(savingToDrive || (serverSaving && storageMode === "drive")) && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
+          <div className="bg-white rounded shadow p-6 max-w-sm text-center">
+            <div className="text-base font-medium mb-1">Please wait…</div>
+            <div className="text-sm text-gray-700">
+              {savingToDrive ? "Saving video to Google Drive. Do not close this tab." : "Finalizing save. Do not close this tab."}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Drive folder picker modal */}
       <DriveFolderModal
         open={folderModalOpen}
