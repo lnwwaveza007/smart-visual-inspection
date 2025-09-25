@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RECORDS_ENDPOINT } from "@/lib/config";
+import Modal from "@/app/components/Modal";
 // Camera is for preview only; barcode scanned via hardware input
 
 type Remark = {
@@ -77,11 +78,31 @@ export default function RecordPage() {
   const [driveTokenExpiryMs, setDriveTokenExpiryMs] = useState<number>(0);
   const [driveFolderId, setDriveFolderId] = useState<string | null>(null);
   const [driveFolderName, setDriveFolderName] = useState<string | null>(null);
-  const [driveFolders, setDriveFolders] = useState<Array<{ id: string; name: string }>>([]);
+  // legacy inline select removed in favor of explorer modal
   const [driveError, setDriveError] = useState<string | null>(null);
+  const [folderModalOpen, setFolderModalOpen] = useState(false);
+  // Explorer state
+  const [explorerPath, setExplorerPath] = useState<Array<{ id: string; name: string }>>([{ id: "", name: "My Drive" }]);
+  const [explorerFolders, setExplorerFolders] = useState<Array<{ id: string; name: string }>>([]);
+  const [explorerLoading, setExplorerLoading] = useState(false);
 
   const [nameInput, setNameInput] = useState("");
   const [remarkInput, setRemarkInput] = useState("");
+
+  // Camera testing: allow disabling camera completely
+  const [cameraDisabled, setCameraDisabled] = useState<boolean>(false);
+  const CAMERA_DISABLED_KEY = "svi.cameraDisabled";
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(CAMERA_DISABLED_KEY);
+      if (saved === "1") setCameraDisabled(true);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(CAMERA_DISABLED_KEY, cameraDisabled ? "1" : "0");
+    } catch {}
+  }, [cameraDisabled]);
 
   // legacy scan state removed; manual item flow in use
 
@@ -89,7 +110,7 @@ export default function RecordPage() {
   const activeRecord = useMemo(() => (activeBarcode ? records[activeBarcode] : undefined), [records, activeBarcode]);
 
   // Enumerate available video input devices and keep selection valid
-  async function queryDevices() {
+  const queryDevices = useCallback(async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videos = devices
@@ -103,7 +124,7 @@ export default function RecordPage() {
     } catch {
       // ignore
     }
-  }
+  }, [selectedDeviceId]);
 
   useEffect(() => {
     // Load saved records on mount
@@ -164,8 +185,17 @@ export default function RecordPage() {
       if (driveAccessToken && Date.now() < driveTokenExpiryMs - 10_000) {
         return driveAccessToken;
       }
-      const googleAny = (window as unknown as { google: any }).google;
-      if (!googleAny?.accounts?.oauth2?.initTokenClient) {
+      type TokenClient = { requestAccessToken: () => void };
+      type GoogleOauth2 = { initTokenClient?: (args: {
+        client_id: string;
+        scope: string;
+        prompt?: string;
+        callback: (resp: { access_token?: string; expires_in?: number; error?: string }) => void;
+      }) => TokenClient };
+      type GoogleGlobal = { accounts?: { oauth2?: GoogleOauth2 } };
+      const googleGlobal = (window as unknown as { google?: GoogleGlobal }).google;
+      const oauth2 = googleGlobal?.accounts?.oauth2;
+      if (!oauth2?.initTokenClient) {
         setDriveError("Google auth unavailable");
         return null;
       }
@@ -175,7 +205,13 @@ export default function RecordPage() {
       ].join(" ");
       const token: { value: string | null } = { value: null };
       await new Promise<void>((resolve) => {
-        const client = googleAny.accounts.oauth2.initTokenClient({
+        const init = oauth2.initTokenClient;
+        if (!init) {
+          setDriveError("Google auth unavailable");
+          resolve();
+          return;
+        }
+        const client = init({
           client_id: clientId,
           scope: scopes,
           prompt: interactive ? "consent" : "",
@@ -202,20 +238,34 @@ export default function RecordPage() {
     }
   }
 
-  async function listTopLevelDriveFolders(): Promise<void> {
+  async function listDriveFolders(parentId: string | null): Promise<Array<{ id: string; name: string }>> {
     try {
       const token = await ensureDriveToken(true);
-      if (!token) return;
-      const q = encodeURIComponent("mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents");
-      const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=100`, {
+      if (!token) return [];
+      const parentExpr = parentId ? `'${parentId}' in parents` : `'root' in parents`;
+      const q = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and trashed=false and ${parentExpr}`);
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=200`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error(`Drive list failed ${res.status}`);
-      const data = (await res.json()) as { files?: Array<{ id: string; name: string }>};
-      setDriveFolders(data.files || []);
+      const data = (await res.json()) as { files?: Array<{ id: string; name: string }>} ;
+      return data.files || [];
     } catch (e) {
       setDriveError(e instanceof Error ? e.message : "Failed to list folders");
+      return [];
     }
+  }
+
+  function openFolderModal() {
+    setFolderModalOpen(true);
+    setDriveError(null);
+    // Start at root for simplicity
+    const initialPath = [{ id: "", name: "My Drive" }];
+    setExplorerPath(initialPath);
+    setExplorerLoading(true);
+    listDriveFolders(null)
+      .then((items) => setExplorerFolders(items))
+      .finally(() => setExplorerLoading(false));
   }
 
   async function uploadVideoToDrive(blob: Blob, filename: string, mimeType: string, folderId?: string | null): Promise<{ id: string; webViewLink?: string; webContentLink?: string } | null> {
@@ -258,6 +308,20 @@ export default function RecordPage() {
 
     const start = async () => {
       try {
+        if (cameraDisabled) {
+          // Ensure any existing stream is stopped
+          const existing = streamRef.current;
+          if (existing) {
+            existing.getTracks().forEach((t) => t.stop());
+          }
+          streamRef.current = null;
+          setCameraActive(false);
+          if (videoEl) {
+            (videoEl as unknown as { srcObject: MediaStream | null }).srcObject = null;
+          }
+          setCameraError(null);
+          return;
+        }
         const constraints: MediaStreamConstraints = {
           video: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : { facingMode: "environment" },
           audio: false,
@@ -297,7 +361,7 @@ export default function RecordPage() {
         (videoEl as unknown as { srcObject: MediaStream | null }).srcObject = null;
       }
     };
-  }, [selectedDeviceId]);
+  }, [selectedDeviceId, cameraDisabled, queryDevices]);
 
   // Auto-refresh the device list when cameras are plugged/unplugged
   useEffect(() => {
@@ -312,7 +376,7 @@ export default function RecordPage() {
         navigator.mediaDevices.removeEventListener("devicechange", handler);
       } catch {}
     };
-  }, []);
+  }, [queryDevices]);
 
   function ensureRecord(barcode: string): ItemRecord {
     const existing = records[barcode];
@@ -624,35 +688,17 @@ export default function RecordPage() {
                     Sign in to Drive
                   </button>
                 ) : (
-                  <span className="text-xs text-green-700">Drive connected</span>
-                )}
-                <button
-                  type="button"
-                  className="px-3 py-1.5 rounded border"
-                  onClick={() => listTopLevelDriveFolders()}
-                >
-                  Browse folders
-                </button>
-                {driveFolders.length > 0 && (
-                  <select
-                    className="border border-gray-300 rounded px-2 py-1 text-sm"
-                    value={driveFolderId ?? ""}
-                    onChange={(e) => {
-                      const id = e.target.value || null;
-                      setDriveFolderId(id);
-                      const found = driveFolders.find((f) => f.id === id);
-                      setDriveFolderName(found?.name || null);
-                    }}
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded border"
+                    onClick={openFolderModal}
                   >
-                    <option value="">My Drive (root)</option>
-                    {driveFolders.map((f) => (
-                      <option key={f.id} value={f.id}>{f.name}</option>
-                    ))}
-                  </select>
+                    Browse folders
+                  </button>
                 )}
-                {driveFolderName && (
-                  <span className="text-xs text-gray-600">Folder: {driveFolderName}</span>
-                )}
+                <span className="text-xs text-gray-600">
+                  Folder: {driveFolderName ? driveFolderName : "My Drive (root)"}
+                </span>
                 {driveError && (
                   <span className="text-xs text-red-600">{driveError}</span>
                 )}
@@ -666,6 +712,7 @@ export default function RecordPage() {
                 className="w-full border border-gray-300 rounded px-3 py-2 bg-white disabled:bg-gray-100"
                 value={selectedDeviceId ?? ""}
                 onChange={(e) => setSelectedDeviceId(e.target.value || null)}
+                disabled={cameraDisabled}
               >
                 {cameraDevices.length === 0 ? (
                   <option value="">Default camera</option>
@@ -682,9 +729,18 @@ export default function RecordPage() {
               type="button"
               onClick={() => queryDevices()}
               className="px-3 py-2 rounded border"
+              disabled={cameraDisabled}
             >
               Refresh
             </button>
+            <label className="text-sm flex items-center gap-2 border rounded px-3 py-2">
+              <input
+                type="checkbox"
+                checked={cameraDisabled}
+                onChange={(e) => setCameraDisabled(e.target.checked)}
+              />
+              Disable camera (testing)
+            </label>
           </div>
           <div className="aspect-video w-full bg-black/80 rounded overflow-hidden flex items-center justify-center">
             <video
@@ -702,7 +758,7 @@ export default function RecordPage() {
             ) : cameraActive ? (
               <span>Camera is active (preview only).</span>
             ) : (
-              <span>Starting camera…</span>
+              <span>{cameraDisabled ? "Camera disabled for testing." : "Starting camera…"}</span>
             )}
           </div>
 
@@ -802,7 +858,133 @@ export default function RecordPage() {
           <div className="mt-3">{rightPanelContent}</div>
         </div>
       </div>
+      {/* Drive folder picker modal */}
+      <DriveFolderModal
+        open={folderModalOpen}
+        path={explorerPath}
+        items={explorerFolders}
+        loading={explorerLoading}
+        onRefresh={() => {
+          const current = explorerPath.at(-1);
+          setExplorerLoading(true);
+          listDriveFolders(current && current.id ? current.id : null)
+            .then((items) => setExplorerFolders(items))
+            .finally(() => setExplorerLoading(false));
+        }}
+        onNav={(folder) => {
+          const nextPath = [...explorerPath, { id: folder.id, name: folder.name }];
+          setExplorerPath(nextPath);
+          setExplorerLoading(true);
+          listDriveFolders(folder.id)
+            .then((items) => setExplorerFolders(items))
+            .finally(() => setExplorerLoading(false));
+        }}
+        onUpTo={(idx) => {
+          const nextPath = explorerPath.slice(0, idx + 1);
+          setExplorerPath(nextPath);
+          const current = nextPath.at(-1);
+          setExplorerLoading(true);
+          listDriveFolders(current && current.id ? current.id : null)
+            .then((items) => setExplorerFolders(items))
+            .finally(() => setExplorerLoading(false));
+        }}
+        onCancel={() => setFolderModalOpen(false)}
+        onClear={() => {
+          setDriveFolderId(null);
+          setDriveFolderName(null);
+          setExplorerPath([{ id: "", name: "My Drive" }]);
+          setFolderModalOpen(false);
+        }}
+        onSelectHere={() => {
+          const current = explorerPath.at(-1);
+          const id = current && current.id ? current.id : null;
+          setDriveFolderId(id);
+          setDriveFolderName(current ? current.name : null);
+          setFolderModalOpen(false);
+        }}
+      />
     </div>
+  );
+}
+
+// Modal to pick Google Drive folder
+function DriveFolderModal({
+  open,
+  path,
+  items,
+  loading,
+  onNav,
+  onUpTo,
+  onRefresh,
+  onCancel,
+  onClear,
+  onSelectHere,
+}: {
+  open: boolean;
+  path: Array<{ id: string; name: string }>;
+  items: Array<{ id: string; name: string }>;
+  loading: boolean;
+  onNav: (folder: { id: string; name: string }) => void;
+  onUpTo: (index: number) => void;
+  onRefresh: () => void;
+  onCancel: () => void;
+  onClear: () => void;
+  onSelectHere: () => void;
+}) {
+  return (
+    <Modal
+      open={open}
+      title="Select Google Drive Folder"
+      onClose={onCancel}
+      footer={(
+        <>
+          <button type="button" className="px-3 py-1.5 rounded border" onClick={onCancel}>Cancel</button>
+          <button type="button" className="px-3 py-1.5 rounded bg-blue-600 text-white" onClick={onSelectHere}>Select this folder</button>
+        </>
+      )}
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <span className="text-gray-500">Location:</span>
+          <nav className="flex items-center gap-1 flex-wrap">
+            {path.map((p, idx) => (
+              <span key={p.id + idx} className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className="text-blue-700 hover:underline"
+                  onClick={() => onUpTo(idx)}
+                >
+                  {p.name}
+                </button>
+                {idx < path.length - 1 && <span className="text-gray-400">/</span>}
+              </span>
+            ))}
+          </nav>
+        </div>
+        <button type="button" className="px-2 py-1 text-sm rounded border" onClick={onRefresh} disabled={loading}>
+          {loading ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+        {loading ? (
+          <div className="text-sm text-gray-500">Loading…</div>
+        ) : items.length === 0 ? (
+          <div className="text-sm text-gray-500">No folders in this location.</div>
+        ) : (
+          items.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              className="flex items-center gap-2 p-3 border rounded hover:bg-gray-50 text-left"
+              onClick={() => onNav(f)}
+            >
+              <span className="inline-flex items-center justify-center w-8 h-8 rounded bg-gray-100">📁</span>
+              <span className="truncate">{f.name}</span>
+            </button>
+          ))
+        )}
+      </div>
+    </Modal>
   );
 }
 
