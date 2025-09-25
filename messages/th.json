@@ -16,8 +16,8 @@
     "switchToEnglish": "EN"
   },
   "home": {
-    "heading": "การตรวจสอบด้วยภาพอัจฉริยะ",
-    "routes": "เส้นทาง",
+    "heading": "Smart Visual Inspection",
+    "routes": "ลิงค์ไปยังส่วนต่างๆ",
     "record": "/record — บันทึกและประวัติ",
     "report": "/report — ตัวดูรายงาน",
     "reportTable": "/report-table — รายงานแบบตาราง"
