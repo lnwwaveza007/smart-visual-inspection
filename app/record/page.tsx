@@ -53,6 +53,7 @@ function formatOffset(ms: number): string {
 
 export default function RecordPage() {
   const t = useTranslations("record");
+  const tDrive = useTranslations("drive");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -76,7 +77,7 @@ export default function RecordPage() {
   const [savingToDrive, setSavingToDrive] = useState(false);
 
   // Storage selection and Google Drive auth state
-  const [storageMode, setStorageMode] = useState<"local" | "drive">("local");
+  const [storageMode, setStorageMode] = useState<"local" | "drive">("drive");
   const [driveAccessToken, setDriveAccessToken] = useState<string | null>(null);
   const [driveTokenExpiryMs, setDriveTokenExpiryMs] = useState<number>(0);
   const [driveFolderId, setDriveFolderId] = useState<string | null>(null);
@@ -304,7 +305,7 @@ export default function RecordPage() {
     setFolderModalOpen(true);
     setDriveError(null);
     // Start at root for simplicity
-    const initialPath = [{ id: "", name: "My Drive" }];
+    const initialPath = [{ id: "", name: tDrive("myDrive") }];
     setExplorerPath(initialPath);
     setExplorerLoading(true);
     listDriveFolders(null)
@@ -707,13 +708,14 @@ export default function RecordPage() {
           {/* Storage selection */}
           <div className="mb-3 flex flex-wrap items-center gap-3">
             <label className="text-sm">{t("storage")}</label>
-            <label className="text-sm flex items-center gap-1">
+            <label className="text-sm flex items-center gap-1 text-gray-400">
               <input
                 type="radio"
                 name="storage"
                 value="local"
                 checked={storageMode === "local"}
-                onChange={() => setStorageMode("local")}
+                onChange={() => {}}
+                disabled
               />
               {t("local")}
             </label>
@@ -739,7 +741,7 @@ export default function RecordPage() {
                       onClick={() => ensureDriveToken(true)}
                       disabled={serverSaving || savingToDrive}
                     >
-                      {t("signIn")}
+                      {tDrive("signIn")}
                     </button>
                   ) : (
                     <button
@@ -748,12 +750,12 @@ export default function RecordPage() {
                       onClick={openFolderModal}
                       disabled={serverSaving || savingToDrive}
                     >
-                      {t("browseFolders")}
+                      {tDrive("browseFolders")}
                     </button>
                   );
                 })()}
                 <span className="text-xs text-gray-600">
-                  {t("folder")} {driveFolderName ? driveFolderName : t("rootLabel")}
+                  {t("folder")} {driveFolderName ? driveFolderName : tDrive("rootLabel")}
                 </span>
                 {driveError && (
                   <span className="text-xs text-red-600">{driveError}</span>
@@ -919,8 +921,8 @@ export default function RecordPage() {
       {(savingToDrive || (serverSaving && storageMode === "drive")) && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
           <div className="bg-white rounded shadow p-6 max-w-sm text-center">
-            <div className="text-base font-medium mb-1">{t("pleaseWait")}</div>
-            <div className="text-sm text-gray-700">{savingToDrive ? t("savingToDrive") : t("finalizing")}</div>
+            <div className="text-base font-medium mb-1">{tDrive("pleaseWait")}</div>
+            <div className="text-sm text-gray-700">{savingToDrive ? tDrive("savingToDrive") : tDrive("finalizing")}</div>
           </div>
         </div>
       )}
@@ -989,21 +991,22 @@ function DriveFolderModal({
   onCancel: () => void;
   onSelectHere: () => void;
 }) {
+  const tDrive = useTranslations("drive");
   return (
     <Modal
       open={open}
-      title={useTranslations("drive")("selectFolderTitle")}
+      title={tDrive("selectFolderTitle")}
       onClose={onCancel}
       footer={(
         <>
-          <button type="button" className="px-3 py-1.5 rounded border" onClick={onCancel}>{useTranslations("drive")("cancel")}</button>
-          <button type="button" className="px-3 py-1.5 rounded bg-blue-600 text-white" onClick={onSelectHere}>{useTranslations("drive")("selectThisFolder")}</button>
+          <button type="button" className="px-3 py-1.5 rounded border" onClick={onCancel}>{tDrive("cancel")}</button>
+          <button type="button" className="px-3 py-1.5 rounded bg-blue-600 text-white" onClick={onSelectHere}>{tDrive("selectThisFolder")}</button>
         </>
       )}
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2 text-sm text-gray-600">
-          <span className="text-gray-500">{useTranslations("drive")("location")}</span>
+          <span className="text-gray-500">{tDrive("location")}</span>
           <nav className="flex items-center gap-1 flex-wrap">
             {path.map((p, idx) => (
               <span key={p.id + idx} className="flex items-center gap-1">
@@ -1020,14 +1023,14 @@ function DriveFolderModal({
           </nav>
         </div>
         <button type="button" className="px-2 py-1 text-sm rounded border" onClick={onRefresh} disabled={loading}>
-          {loading ? useTranslations("drive")("loading") : useTranslations("drive")("refresh")}
+          {loading ? tDrive("loading") : tDrive("refresh")}
         </button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
         {loading ? (
-          <div className="text-sm text-gray-500">{useTranslations("drive")("loading")}</div>
+          <div className="text-sm text-gray-500">{tDrive("loading")}</div>
         ) : items.length === 0 ? (
-          <div className="text-sm text-gray-500">{useTranslations("drive")("noFolders")}</div>
+          <div className="text-sm text-gray-500">{tDrive("noFolders")}</div>
         ) : (
           items.map((f) => (
             <button
