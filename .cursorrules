@@ -1,0 +1,103 @@
+Project: Smart Visual Inspection (SVI)
+
+Purpose
+- Provide consistent guidance for contributors and AI pair-programming in Cursor.
+- Capture coding standards, environment setup, architectural conventions, and PR quality checks.
+
+Tech stack
+- Next.js 15 (App Router) + React 19
+- TypeScript (strict), Tailwind CSS v4 (`@tailwindcss/postcss`)
+- MongoDB (Node driver)
+- Google Identity Services + Google Drive API (token in httpOnly cookie)
+
+Runbook
+- Install: `npm ci`
+- Local env: create `.env.local`
+  - `NEXT_PUBLIC_GOOGLE_CLIENT_ID=<required for Drive>`
+  - `MONGO_URI=mongodb://admin:secret123@localhost:11802` (recommended for local dev)
+  - `NEXT_PUBLIC_API_BASE_URL` optional; app uses own API by default
+- Local Mongo (optional): `docker compose -f database/docker-compose.yml up -d`
+- Dev: `npm run dev`
+- Build: `npm run build`, Start: `npm run start`
+- Lint: `npm run lint`
+
+Architecture and conventions
+- App Router structure under `app/`.
+  - Pages: `app/<route>/page.tsx`.
+  - API routes: `app/api/<name>/route.ts`.
+- Path alias `@/*` -> repo root.
+- Use client/server components intentionally. Mark components with `"use client"` only if they use browser APIs or hooks.
+- Data
+  - Mongo connection via `lib/mongodb.ts` (`getDb`).
+  - Records stored in collection `records`. Keep `database/mongo_rule.json` in sync with any structural changes.
+- Google Drive
+  - Client obtains short-lived access tokens via Google Identity Services using `NEXT_PUBLIC_GOOGLE_CLIENT_ID`.
+  - Server stores token in cookie via `POST /api/drive/token` and uses it for: list, upload, stream routes.
+  - Scopes currently used: `drive.file`, `drive.metadata.readonly`.
+- Video handling
+  - Local: `POST /api/upload` saves under `public/videos/{sessionId}.{ext}`.
+  - Drive: `POST /api/drive/upload` multipart upload, then `GET /api/drive/stream` for playback with Range support.
+
+Coding standards
+- TypeScript
+  - Keep `strict` happy; avoid `any`. Use precise types for API inputs/outputs.
+  - Name things descriptively (no 1–2 char names). Functions: verbs; variables: nouns.
+  - Prefer early returns and shallow nesting.
+  - Handle errors meaningfully; don’t swallow exceptions silently.
+- Formatting
+  - Match existing style; avoid reformatting unrelated code.
+  - Prefer multi-line clarity over clever one-liners.
+  - Keep imports ordered by module, then local. Remove unused imports.
+- Comments
+  - Explain “why” for non-obvious code. Avoid noisy inline comments.
+- UI
+  - Tailwind first; keep class names readable; avoid deeply nested DOM.
+  - Reuse primitives (e.g., `Modal`, `Navbar`, `DriveAuthGate`).
+
+Security & privacy
+- Do not commit secrets. Use `.env.local`.
+- Google Drive token is stored in an httpOnly cookie. In production the cookie must be `secure` and `sameSite=lax` (already enforced).
+- Avoid storing access tokens in `localStorage`.
+- Validate inputs in API routes; always return JSON with proper status codes.
+
+API guidance
+- Use `NextResponse.json` consistently.
+- Validate `req.url` params via `new URL(req.url)`.
+- For binary endpoints, pass through `Range` and media headers.
+- Prefer small, composable endpoints over monoliths.
+
+Mongo guidance
+- Use `getDb()` once per request; reuse collection handles within the request.
+- Favor bulk operations where appropriate (see `/api/records` PUT).
+- Keep record schema stable; if adding fields, update reader/writer code and README.
+
+Performance
+- Use `cache: "no-store"` on `fetch` calls that should bypass client caching.
+- Avoid long-running work on the client main thread.
+
+Adding new features
+- Extend pages under `app/` and colocate lightweight components with usage.
+- For Drive features, always gate on presence of a valid cookie/token; avoid prompting unnecessarily.
+- If you add external API calls, prefer server-side routes to avoid CORS and token exposure.
+
+Testing & manual checks
+- No formal test suite yet; minimally verify:
+  - Record start/stop works in Chrome on desktop.
+  - Local save: file appears under `public/videos` and plays.
+  - Drive save: folder picker, upload, and `/api/drive/stream` playback.
+  - Records appear in `/report` and `/report-table`; delete removes both DB document and video where possible.
+
+PR checklist
+- [ ] Lints pass (`npm run lint`).
+- [ ] No unrelated formatting diffs; only intended edits.
+- [ ] API inputs validated and error states handled.
+- [ ] README updated if env vars, routes, or flows changed.
+- [ ] For Drive-related changes: verified cookie/token flow in dev and production assumptions.
+- [ ] Mongo changes reflected in `database/mongo_rule.json` if applicable.
+
+Cursor assistant guidance
+- Prefer minimal, surgical edits; preserve indentation and surrounding style.
+- Don’t refactor broadly unless explicitly requested.
+- When adding env vars or routes, update README and this file where relevant.
+- When touching large files (e.g., `app/record/page.tsx`), keep functions focused and avoid cascading changes.
+
