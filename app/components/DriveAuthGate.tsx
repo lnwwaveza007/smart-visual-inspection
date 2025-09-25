@@ -11,6 +11,17 @@ export default function DriveAuthGate() {
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
+  // Listen for global request to open the sign-in modal
+  useEffect(() => {
+    const onOpen = () => {
+      setModalOpen(true);
+    };
+    window.addEventListener("svi:drive:openSignIn", onOpen as EventListener);
+    return () => {
+      window.removeEventListener("svi:drive:openSignIn", onOpen as EventListener);
+    };
+  }, []);
+
   useEffect(() => {
     let alive = true;
     const check = async () => {
@@ -21,10 +32,13 @@ export default function DriveAuthGate() {
         const ok = Boolean(json?.authed);
         setAuthed(ok);
         setModalOpen(!ok);
+        // Broadcast auth state for other components (e.g., Navbar)
+        try { window.dispatchEvent(new CustomEvent("svi:drive:auth", { detail: { authed: ok } })); } catch {}
       } catch {
         if (!alive) return;
         setAuthed(false);
         setModalOpen(true);
+        try { window.dispatchEvent(new CustomEvent("svi:drive:auth", { detail: { authed: false } })); } catch {}
       }
     };
     check();
@@ -90,6 +104,7 @@ export default function DriveAuthGate() {
                   }).then(() => {
                     setAuthed(true);
                     setModalOpen(false);
+                try { window.dispatchEvent(new CustomEvent("svi:drive:auth", { detail: { authed: true } })); } catch {}
                   });
                 }
               } catch {}
@@ -151,6 +166,7 @@ export default function DriveAuthGate() {
               body: JSON.stringify({ accessToken: resp.access_token, expiresInSec }),
             }).then(() => {
               setAuthed(true);
+              try { window.dispatchEvent(new CustomEvent("svi:drive:auth", { detail: { authed: true } })); } catch {}
             }).catch(() => {});
           }
         },

@@ -13,7 +13,9 @@
     "thai": "Thai",
     "english": "English",
     "switchToThai": "TH",
-    "switchToEnglish": "EN"
+    "switchToEnglish": "EN",
+    "signOut": "Sign out",
+    "login": "Login"
   },
   "home": {
     "heading": "Smart Visual Inspection",
