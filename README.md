@@ -32,7 +32,7 @@ Create `.env.local` at the repo root and set at least the Google Client ID. Mong
 ```bash
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-oauth-client-id
 # Recommended for local dev with the included docker-compose:
-# MONGO_URI=mongodb://admin:secret123@localhost:11802
+# MONGO_URI=mongodb://<user>:<password>@localhost:11802
 
 # Optional: only needed if proxying to an external upstream for records (not used by default)
 # NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
@@ -46,7 +46,7 @@ The repo includes `database/docker-compose.yml` exposing Mongo on port 11802 wit
 docker compose -f database/docker-compose.yml up -d
 ```
 
-Then set `MONGO_URI=mongodb://admin:secret123@localhost:11802` in `.env.local`.
+Then set `MONGO_URI=mongodb://<user>:<password>@localhost:11802` in `.env.local`.
 
 4) Run the app
 

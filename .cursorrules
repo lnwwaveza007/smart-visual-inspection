@@ -14,7 +14,7 @@ Runbook
 - Install: `npm ci`
 - Local env: create `.env.local`
   - `NEXT_PUBLIC_GOOGLE_CLIENT_ID=<required for Drive>`
-  - `MONGO_URI=mongodb://admin:secret123@localhost:11802` (recommended for local dev)
+  - `MONGO_URI=mongodb://<user>:<password>@localhost:11802` (recommended for local dev)
   - `NEXT_PUBLIC_API_BASE_URL` optional; app uses own API by default
 - Local Mongo (optional): `docker compose -f database/docker-compose.yml up -d`
 - Dev: `npm run dev`

@@ -1,6 +1,6 @@
 import { MongoClient, Db } from "mongodb";
 
-const DEFAULT_URI = "mongodb://admin:secret123@shared1.bsthun.in:11802";
+const DEFAULT_URI = "mongodb://localhost:27017";
 const uri: string = (process.env.MONGO_URI as string) || DEFAULT_URI;
 
 let client: MongoClient | null = null;
